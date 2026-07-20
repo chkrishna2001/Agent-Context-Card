@@ -252,7 +252,23 @@ Release procedure:
 
 Stable versions publish under the npm latest distribution tag. Semver prereleases publish under next.
 
-The npm package must exist before npm trusted publishing can be configured. Bootstrap the first tag release with a temporary GitHub repository secret named NPM_TOKEN. After 0.1.0 exists:
+A failed publish can be retried without moving or recreating its tag:
+
+- use Re-run all jobs on the original failed Actions run; or
+- use Publish npm → Run workflow and enter the existing version tag.
+
+Manual dispatch still checks out the immutable tag, requires it to exist on main, and applies the same version and changelog validation. It cannot publish arbitrary branch contents.
+
+The npm package must exist before npm trusted publishing can be configured. Bootstrap the first tag release with a short-lived granular npm access token stored as the GitHub repository secret NPM_TOKEN. Because this is a non-interactive direct publish, the bootstrap token must:
+
+- have read/write package permission;
+- cover all packages while the new package does not yet exist;
+- have bypass 2FA enabled;
+- use the shortest practical expiration.
+
+A normal token without bypass 2FA fails with EOTP because a GitHub-hosted runner cannot complete npm's interactive OTP prompt. This bypass token is a one-time bootstrap mechanism, not the steady-state authentication design.
+
+After 0.1.0 exists:
 
 1. configure npm trusted publishing for user chkrishna2001, repository Agent-Context-Card, workflow publish.yml, allowing npm publish;
 2. delete the NPM_TOKEN GitHub secret;

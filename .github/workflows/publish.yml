@@ -4,26 +4,39 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to validate and publish"
+        required: true
+        type: string
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: npm-publish-${{ github.ref }}
+  group: npm-publish-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
 
-      - name: Require tag commit on main
-        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Require an existing tag on main
+        shell: bash
+        run: |
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "$RELEASE_TAG")"
+          git merge-base --is-ancestor HEAD origin/main
 
       - name: Set up Node and npm registry
         uses: actions/setup-node@v6
@@ -41,7 +54,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Validate tag, version, and changelog
-        run: node scripts/validate-release.mjs --tag "$GITHUB_REF_NAME"
+        run: node scripts/validate-release.mjs --tag "$RELEASE_TAG"
 
       - name: Test
         run: bun test
@@ -68,7 +81,15 @@ jobs:
             echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish to npm
+      - name: Publish tag to npm
+        if: github.event_name == 'push'
         run: npm publish --access public --provenance --tag "${{ steps.distribution.outputs.tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Retry existing tag publication
+        if: github.event_name == 'workflow_dispatch'
+        # Explicit validation above replaces the tagged source's lifecycle guard.
+        run: npm publish --ignore-scripts --access public --provenance --tag "${{ steps.distribution.outputs.tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 
-const tag = process.env.GITHUB_REF_NAME;
+const tag = process.env.RELEASE_TAG || process.env.GITHUB_REF_NAME;
+const tagPush = process.env.GITHUB_REF_TYPE === "tag";
+const manualTagRetry = process.env.GITHUB_EVENT_NAME === "workflow_dispatch";
 if (
   process.env.GITHUB_ACTIONS !== "true" ||
-  process.env.GITHUB_REF_TYPE !== "tag" ||
+  (!tagPush && !manualTagRetry) ||
   !tag
 ) {
   throw new Error(
