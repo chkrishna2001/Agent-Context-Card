@@ -224,6 +224,42 @@ Before production:
 7. continue measuring actual provider tokens, not just projected characters;
 8. audit every future host's real context-control capabilities.
 
+## Release automation
+
+npm publishing is tag-only. Do not run npm publish locally.
+
+The repository contains:
+
+- .github/workflows/ci.yml — validates pushes and pull requests;
+- .github/workflows/publish.yml — validates and publishes version tags;
+- CHANGELOG.md — Keep a Changelog release history;
+- scripts/validate-release.mjs — validates semver, tag/version equality, and dated changelog sections;
+- scripts/guard-publish.mjs — blocks publishing outside the tag workflow;
+- .githooks/pre-commit — checks staged version and changelog changes together.
+
+Enable the repository hook once after cloning:
+
+    npm run setup:hooks
+
+Release procedure:
+
+1. Update package.json to the intended semantic version.
+2. Move relevant Unreleased notes into a dated section named exactly for that version.
+3. Update comparison links at the bottom of CHANGELOG.md.
+4. Commit and let CI pass.
+5. Create the matching tag, for example v0.2.0 for package version 0.2.0.
+6. Push the tag. The publish workflow requires the tagged commit to be on main, repeats all validation, and publishes to npm.
+
+Stable versions publish under the npm latest distribution tag. Semver prereleases publish under next.
+
+The npm package must exist before npm trusted publishing can be configured. Bootstrap the first tag release with a temporary GitHub repository secret named NPM_TOKEN. After 0.1.0 exists:
+
+1. configure npm trusted publishing for user chkrishna2001, repository Agent-Context-Card, workflow publish.yml, allowing npm publish;
+2. delete the NPM_TOKEN GitHub secret;
+3. optionally configure npm publishing access to disallow traditional tokens.
+
+The workflow already has OIDC permission and uses a compatible Node/npm version. It will automatically use trusted publishing after npm is configured.
+
 ## Development rules
 
 - Preserve user changes and unrelated dirty-worktree files.
