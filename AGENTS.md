@@ -114,11 +114,11 @@ The passive Pi adapter registers zero tools. A future change that registers a to
 
 Current size:
 
-- fewer than 1,000 TypeScript source lines;
-- approximately 26 KB bundled;
+- 1,661 TypeScript source lines;
+- approximately 40 KB bundled;
 - two Pi peer dependencies;
 - zero runtime dependencies;
-- nine focused tests.
+- twenty-four focused tests.
 
 There is no copied pi-dcp source or runtime dependency. pi-dcp contributed only conceptual context-hook and tool-pairing ancestry.
 
@@ -186,6 +186,76 @@ The card measured 415 characters at the end of turn 1, 595 after documentation, 
 - No card-maintenance or archive calls were available.
 - Both runs completed all four tasks and built the project.
 - The card run made the smaller implementation change and preserved an existing background fallback that the baseline removed unnecessarily.
+
+## Automated cross-session smoke proof
+
+The repository now has an isolated Pi A/B runner at
+`scripts/evaluation/run.mjs`. It copies or checks out a workspace per variant,
+runs ordered sessions, grades repository commands, hashes file changes, asserts
+continuity invariants, and emits raw traces plus JSON and Markdown reports under
+the ignored `.agent-context-card/e/` directory.
+
+The first passing live run used `llama-cloud/gemma4:31b`, thinking off, on a
+four-session plan, implementation, validation, and unrelated-task sequence. Both
+variants passed `node --test counter.check.mjs` and changed only `counter.mjs`.
+
+| Metric                | Baseline | Context card | Change |
+| --------------------- | -------: | -----------: | -----: |
+| Provider requests     |       16 |           13 | -18.8% |
+| Provider input tokens |   24,457 |       21,717 | -11.2% |
+| Output tokens         |      615 |          491 | -20.2% |
+| Tool calls            |       12 |            9 | -25.0% |
+| Tool errors           |        0 |            0 |  equal |
+| Duration              |  71.14 s |      71.86 s |  +1.0% |
+
+All card assertions passed: the plan was captured and promoted without a user
+command, later sessions resumed revision 1 with zero cross-session hot evidence,
+and the unrelated task inherited neither the task nor its plan. The provider
+reported zero cost and cache tokens, so those metrics were recorded but were not
+comparable.
+
+The first attempt caught a real deterministic bug: “follow the previously
+approved plan” was treated as a planning request. Planning detection now matches
+explicit creation/revision intent, with a regression test. This is a single tiny
+fixture and one model run; it proves the harness and continuity path, not broad
+reliability. The protocol and full metric inventory are in
+`docs/automated-multisession-evaluation.md`.
+
+## First SWE-bench Verified pilot
+
+The first pinned official pilot used `sympy__sympy-18211` with
+`llama-cloud/gemma4:31b`, thinking off, split across fresh planning,
+implementation, and review sessions.
+
+| Metric                |   Baseline | Context card |      Change |
+| --------------------- | ---------: | -----------: | ----------: |
+| Official result       | unresolved |     resolved | card passed |
+| Provider input tokens |  1,271,160 |      267,542 |      -79.0% |
+| Provider requests     |         56 |           21 |      -62.5% |
+| Output tokens         |      4,512 |        3,322 |      -26.4% |
+| Tool calls            |         53 |           18 |      -66.0% |
+| Tool errors           |          8 |            0 |       -100% |
+| Duplicate calls       |          4 |            0 |       -100% |
+| Inference duration    |   439.69 s |     287.95 s |      -34.5% |
+
+The baseline produced helper files but no production-code change and failed the
+official FAIL_TO_PASS test. The card patched `sympy/core/relational.py`; the
+official evaluator applied it, passed `test_issue_18188`, passed all 54
+PASS_TO_PASS tests, and marked the instance resolved.
+
+The provider reported zero monetary cost and cache tokens, so provider input is
+the available cost proxy. This is a one-task result, not a pass-rate estimate.
+It is the first evidence that the multi-session policy can improve both
+correctness and efficiency on a real benchmark task.
+
+Benchmark integrity rules learned from this pilot:
+
+- checkpoint every turn before starting the next session;
+- terminate the complete Windows subprocess tree on timeout;
+- exclude `.agent-context-card` state from submitted model patches;
+- normalize evaluator patch transport to LF before Linux Docker application;
+- treat a missing official per-instance report as an evaluation error;
+- report official resolution and exact FAIL_TO_PASS/PASS_TO_PASS counts.
 
 ## What is proved so far
 

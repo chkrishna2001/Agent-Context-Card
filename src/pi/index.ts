@@ -9,6 +9,15 @@ import {
   taskBoundaryForInput,
   taskGoalFromInput,
 } from "../core/anchor";
+import {
+  isPlanningRequest,
+  mergeExecutionJournals,
+  promotePlan,
+  sameRepositoryState,
+  taskIdFromInput,
+  unresolvedPriorExecution,
+} from "../core/continuity";
+import { buildExecutionJournal, isMutationToolName } from "../core/execution";
 import { formatContextCard } from "../core/format";
 import { projectContext } from "../core/projection";
 import { buildRuntimeCard } from "../core/runtime";
@@ -17,15 +26,28 @@ import {
   AUDIT_ENTRY_TYPE,
   CARD_MESSAGE_TYPE,
   emptyAnchor,
+  emptyExecutionJournal,
+  PLAN_ENTRY_TYPE,
+  RESUME_ENTRY_TYPE,
+  TASK_STATE_AUDIT_ENTRY_TYPE,
+  type ExecutionJournal,
+  type PinnedPlan,
+  type PlanCandidate,
+  type PlanStateDetails,
   type ProjectionAudit,
+  type RepositoryProvenance,
+  type ResumeStateDetails,
   type TaskAnchor,
   type TaskAnchorDetails,
+  type TaskSnapshot,
+  type TaskStateAudit,
 } from "../core/types";
 import {
   messageText,
   normalizeMessages,
   scopeMessagesToGoal,
 } from "./normalize";
+import { repositoryProvenance, TaskStore } from "./task-store";
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value), 10);
@@ -59,6 +81,28 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let previousTurnSettled = false;
   let lastCard = "";
   let lastAudit: ProjectionAudit | undefined;
+  let taskId: string | undefined;
+  let plan: PinnedPlan | undefined;
+  let planCandidate: PlanCandidate | undefined;
+  let resumedExecution: ExecutionJournal = emptyExecutionJournal();
+  let resumedProvenance: RepositoryProvenance | undefined;
+  let store: TaskStore | undefined;
+  let mayLoadCrossSession = false;
+  let planningTurn = false;
+  let turnMutated = false;
+
+  const taskAudit = (
+    operation: TaskStateAudit["operation"],
+    status: TaskStateAudit["status"],
+    detail?: string,
+  ): void =>
+    pi.appendEntry<TaskStateAudit>(TASK_STATE_AUDIT_ENTRY_TYPE, {
+      operation,
+      status,
+      taskId,
+      detail,
+      timestamp: new Date().toISOString(),
+    });
 
   pi.registerFlag("context-card-recent-turns", {
     description: "Recent user turns retained verbatim (default: 2)",
@@ -74,12 +118,33 @@ export default function agentContextCard(pi: ExtensionAPI): void {
 
   const reconstruct = (ctx: ExtensionContext): void => {
     anchor = emptyAnchor();
+    taskId = undefined;
     const branch = ctx.sessionManager.getBranch();
+    plan = undefined;
+    planCandidate = undefined;
+    resumedExecution = emptyExecutionJournal();
+    resumedProvenance = undefined;
     for (const entry of branch) {
       if (entry.type !== "custom" || entry.customType !== ANCHOR_ENTRY_TYPE)
         continue;
       const details = entry.data as TaskAnchorDetails | undefined;
       if (details?.anchor) anchor = details.anchor;
+    }
+    for (const entry of branch) {
+      if (entry.type !== "custom") continue;
+      if (entry.customType === PLAN_ENTRY_TYPE) {
+        const details = entry.data as PlanStateDetails | undefined;
+        taskId = details?.taskId;
+        plan = details?.plan;
+        planCandidate = details?.candidate;
+      }
+      if (entry.customType === RESUME_ENTRY_TYPE) {
+        const details = entry.data as ResumeStateDetails | undefined;
+        if (!details?.snapshot) continue;
+        taskId = details.snapshot.taskId;
+        resumedExecution = details.snapshot.execution;
+        resumedProvenance = details.snapshot.provenance;
+      }
     }
     const messages = branchMessages(branch);
     currentTurn = messages.filter((message) => message.role === "user").length;
@@ -94,6 +159,67 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     );
     previousTurnSettled =
       assistant?.role === "assistant" && assistant.stopReason === "stop";
+    store = new TaskStore(ctx.cwd);
+    mayLoadCrossSession = messages.length === 0;
+  };
+
+  const persistPlanState = (): void =>
+    pi.appendEntry<PlanStateDetails>(PLAN_ENTRY_TYPE, {
+      taskId,
+      plan,
+      candidate: planCandidate,
+    });
+
+  const saveTask = async (ctx: ExtensionContext): Promise<void> => {
+    if (!taskId || !store || !anchor.goal) return;
+    const current = buildExecutionJournal(
+      normalizeMessages(branchMessages(ctx.sessionManager.getBranch())),
+    );
+    const snapshot: TaskSnapshot = {
+      schemaVersion: 1,
+      taskId,
+      anchor,
+      plan,
+      candidate: planCandidate,
+      execution: mergeExecutionJournals(resumedExecution, current),
+      provenance: repositoryProvenance(ctx.cwd),
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await store.save(snapshot);
+      taskAudit("save", "success");
+    } catch (error) {
+      taskAudit("save", "failed", String(error));
+    }
+  };
+
+  const runtimeCard = (
+    ctx: ExtensionContext,
+    normalized: ReturnType<typeof normalizeMessages>,
+  ) => {
+    const currentExecution = buildExecutionJournal(normalized);
+    const priorExecution = unresolvedPriorExecution(
+      resumedExecution,
+      currentExecution,
+    );
+    const hasPriorExecution =
+      priorExecution.changes.length > 0 || priorExecution.failures.length > 0;
+    const currentProvenance = resumedProvenance
+      ? repositoryProvenance(ctx.cwd)
+      : undefined;
+    return buildRuntimeCard(ctx.cwd, anchor.goal, normalized, {
+      plan,
+      resumed:
+        hasPriorExecution && resumedProvenance && currentProvenance
+          ? {
+              execution: priorExecution,
+              repositoryChanged: !sameRepositoryState(
+                resumedProvenance,
+                currentProvenance,
+              ),
+            }
+          : undefined,
+    });
   };
 
   const persistAnchor = (text: string, reset: boolean): boolean => {
@@ -104,23 +230,101 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     return true;
   };
 
-  pi.on("session_start", async (_event, ctx) => reconstruct(ctx));
+  pi.on("session_start", async (_event, ctx) => {
+    reconstruct(ctx);
+    try {
+      const removed = await store?.collectGarbage();
+      if (removed) taskAudit("gc", "success", `${removed} expired task(s)`);
+    } catch (error) {
+      taskAudit("gc", "failed", String(error));
+    }
+  });
   pi.on("session_tree", async (_event, ctx) => reconstruct(ctx));
-  pi.on("input", (event) => {
+  pi.on("input", async (event) => {
+    const requestedId = taskIdFromInput(event.text);
+    let resumed = false;
+    if (mayLoadCrossSession) {
+      mayLoadCrossSession = false;
+      if (requestedId && store) {
+        taskId = requestedId;
+        const loaded = await store.load(requestedId);
+        if (loaded.status === "success") {
+          const snapshot = loaded.snapshot;
+          anchor = snapshot.anchor;
+          plan = snapshot.plan;
+          planCandidate = snapshot.candidate;
+          resumedExecution = snapshot.execution;
+          resumedProvenance = snapshot.provenance;
+          pi.appendEntry<ResumeStateDetails>(RESUME_ENTRY_TYPE, { snapshot });
+          pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, {
+            anchor,
+            reset: true,
+          });
+          persistPlanState();
+          taskAudit("load", "success");
+          resumed = true;
+        } else if (loaded.status === "missing") {
+          taskAudit("load", "missing");
+        } else {
+          taskAudit("load", "corrupt", loaded.detail);
+          taskId = undefined;
+        }
+      }
+    }
+
+    planningTurn = isPlanningRequest(event.text);
+    turnMutated = false;
+    if (planCandidate && !planningTurn) {
+      plan = promotePlan(planCandidate, plan);
+      planCandidate = undefined;
+      persistPlanState();
+    }
+
     const boundary = taskBoundaryForInput(event.text, {
       goal: anchor.goal,
       latestRequest,
       settled: previousTurnSettled,
     });
-    if (!anchor.goal || boundary === "new") persistAnchor(event.text, true);
+    if (!resumed && (!anchor.goal || boundary === "new")) {
+      if (boundary === "new" && anchor.goal) {
+        plan = undefined;
+        planCandidate = undefined;
+        resumedExecution = emptyExecutionJournal();
+        resumedProvenance = undefined;
+        taskId = requestedId;
+        persistPlanState();
+      } else if (!taskId) {
+        taskId = requestedId;
+      }
+      persistAnchor(event.text, true);
+    }
     latestRequest = taskGoalFromInput(event.text);
     previousTurnSettled = false;
   });
-  pi.on("turn_end", (event) => {
+  pi.on("tool_execution_end", (event) => {
+    if (!event.isError && isMutationToolName(event.toolName))
+      turnMutated = true;
+  });
+  pi.on("turn_end", async (event, ctx) => {
     previousTurnSettled =
       event.message.role === "assistant" && event.message.stopReason === "stop";
-    if (previousTurnSettled) currentTurn++;
+    if (previousTurnSettled && planningTurn && !turnMutated) {
+      const content = messageText(event.message).trim();
+      if (content) {
+        planCandidate = {
+          content,
+          sourceTurn: currentTurn,
+          capturedAt: new Date().toISOString(),
+        };
+        persistPlanState();
+      }
+    }
+    if (previousTurnSettled) {
+      currentTurn++;
+      await saveTask(ctx);
+    }
   });
+  pi.on("session_shutdown", async (_event, ctx) => saveTask(ctx));
 
   pi.on("context", async (event, ctx) => {
     const withoutCards = event.messages.filter(
@@ -143,9 +347,8 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       2,
     );
     const projection = projectContext(normalized, keepRecentTurns);
-    lastCard = formatContextCard(
-      buildRuntimeCard(ctx.cwd, anchor.goal, normalized),
-    );
+    const card = runtimeCard(ctx, normalized);
+    lastCard = formatContextCard(card);
     const cardMessage: AgentMessage = {
       role: "custom",
       customType: CARD_MESSAGE_TYPE,
@@ -192,6 +395,14 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       retiredTurns: projection.retiredTurns,
       retired: projection.retired,
       hotEvidence: projection.hotEvidence,
+      continuity: {
+        taskId,
+        planRevision: plan?.revision,
+        planChars: plan?.content.length ?? 0,
+        resumedChanges: card.resumed?.execution.changes.length ?? 0,
+        resumedFailures: card.resumed?.execution.failures.length ?? 0,
+        repositoryChanged: card.resumed?.repositoryChanged ?? false,
+      },
     };
     if (pi.getFlag("context-card-audit") !== "off")
       pi.appendEntry<ProjectionAudit>(AUDIT_ENTRY_TYPE, lastAudit);
@@ -208,9 +419,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       const normalized = normalizeMessages(
         branchMessages(ctx.sessionManager.getBranch()),
       );
-      lastCard = formatContextCard(
-        buildRuntimeCard(ctx.cwd, anchor.goal, normalized),
-      );
+      lastCard = formatContextCard(runtimeCard(ctx, normalized));
       ctx.ui.notify(lastCard, "info");
     },
   });
@@ -226,12 +435,27 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   pi.registerCommand("card-reset", {
     description: "Clear the active context card",
     handler: async (_args, ctx) => {
+      const closingTask = taskId;
+      if (closingTask && store) {
+        try {
+          const removed = await store.remove(closingTask);
+          taskAudit("close", removed ? "success" : "missing");
+        } catch (error) {
+          taskAudit("close", "failed", String(error));
+        }
+      }
       anchor = emptyAnchor();
       latestRequest = "";
+      taskId = undefined;
+      plan = undefined;
+      planCandidate = undefined;
+      resumedExecution = emptyExecutionJournal();
+      resumedProvenance = undefined;
       pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, {
         anchor,
         reset: true,
       });
+      persistPlanState();
       ctx.ui.notify("Context card reset.", "info");
     },
   });

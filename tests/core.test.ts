@@ -150,6 +150,38 @@ describe("card extraction", () => {
     });
     expect(card).toContain(goal);
   });
+
+  test("keeps the exact pinned plan and labels resumed facts as historical", () => {
+    const card = formatContextCard({
+      goal: "Implement JIRA-123",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+      plan: {
+        content: "1. Inspect\n2. Implement",
+        revision: 2,
+        sourceTurn: 1,
+        capturedAt: "2026-07-21T00:00:00.000Z",
+      },
+      resumed: {
+        repositoryChanged: true,
+        execution: {
+          changes: [
+            {
+              action: "shell_command bun test",
+              kind: "validation",
+              status: "success",
+              count: 1,
+            },
+          ],
+          failures: [],
+        },
+      },
+    });
+    expect(card).toContain("PINNED PLAN (revision 2)");
+    expect(card).toContain("1. Inspect\n  2. Implement");
+    expect(card).toContain("PRIOR SESSION VERIFIED FACTS");
+    expect(card).toContain("REPOSITORY STATE CHANGED");
+  });
 });
 
 test("task boundaries favor continuation while work is unsettled", () => {

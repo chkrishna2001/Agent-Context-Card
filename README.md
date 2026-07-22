@@ -5,6 +5,11 @@
 agent-context-card is a passive context-projection extension for Pi. It keeps exact evidence while it is useful, retires it when observable lifecycle events make it replaceable, and prevents unrelated tasks from inheriting old context.
 
 > **Measured result:** 58.3% fewer provider input tokens in a four-turn Gemma A/B run, with 25% fewer tool calls and zero tool errors in the card-enabled session.
+>
+> **First SWE-bench Verified pilot:** the card resolved
+> sympy__sympy-18211 with 79.0% fewer provider-input tokens and 66.0% fewer
+> tool calls; the no-extension baseline was unresolved. This is one task, not a
+> pass-rate claim.
 
 ## Why use it?
 
@@ -25,6 +30,8 @@ agent-context-card takes a different approach:
 - **No arbitrary character cap.** Context follows task complexity.
 - **Inspectable decisions.** Retirement metrics stay outside model context.
 - **Automatic task isolation.** Unrelated work starts with a clean task scope.
+- **Experimental task continuity.** Exact ticket IDs can resume plans and
+  historical execution facts across Pi sessions without carrying stale reads.
 
 ## Install
 
@@ -50,15 +57,22 @@ Project home: [github.com/chkrishna2001/Agent-Context-Card](https://github.com/c
 
 ## What changes in the model context?
 
-| Kept while useful                 | Retired when consumed                         |
-| --------------------------------- | --------------------------------------------- |
-| Current task and latest request   | Superseded directory listings and searches    |
-| Exact active file-read output     | Exact duplicate tool rounds                   |
-| Valid tool-call/tool-result pairs | Intermediate history from completed turns     |
-| Unresolved failures               | Pre-edit file versions after a grace boundary |
-| Verified changes and validations  | Context from an unrelated prior task          |
+| Kept while useful                             | Retired when consumed                         |
+| --------------------------------------------- | --------------------------------------------- |
+| Current task, latest request, and pinned plan | Superseded directory listings and searches    |
+| Exact active file-read output                 | Exact duplicate tool rounds                   |
+| Valid tool-call/tool-result pairs             | Intermediate history from completed turns     |
+| Unresolved failures                           | Pre-edit file versions after a grace boundary |
+| Verified changes and validations              | Context from an unrelated prior task          |
 
 The model receives a small derived card plus the projected live transcript. It is never asked to update or restate the card.
+
+Cross-session continuity is opt-in through an exact task ID such as `JIRA-123`
+or `django__django-12345`. A planning request captures the agent's exact final
+plan automatically; continuing the same task promotes it into the card. Stored
+execution facts are labeled as prior-session facts, and file-read evidence is
+never resumed. State is kept under `.agent-context-card/tasks/` and
+`/card-reset` removes the active task's stored snapshot.
 
 ```mermaid
 flowchart LR
@@ -85,13 +99,25 @@ The implementation turn retained essentially the same amount of evidence. Across
 
 This is a research preview, not a universal performance claim. Read the [design history, full protocol, per-turn data, limitations, and release gates](docs/design-and-evaluation.md).
 
+### Automated cross-session evaluation
+
+Run the isolated Pi baseline/card smoke test with:
+
+    bun run eval:pi
+
+It grades a real failing test, verifies workspace hashes and continuity
+invariants, and captures provider, tool, timing, session, projection, and task
+state metrics. The finalized live run preserved correctness while reducing
+provider input by 11.2%, requests by 18.8%, and tool calls by 25.0%; duration was
+effectively flat at 1.0% slower. See the [automated protocol and full result](docs/automated-multisession-evaluation.md).
+
 ## Commands and configuration
 
 | Command                | Purpose                            |
 | ---------------------- | ---------------------------------- |
 | /card                  | Show the current derived card      |
 | /card-new &lt;goal&gt; | Start an explicit task             |
-| /card-reset            | Clear the task anchor              |
+| /card-reset            | Clear and close the active task    |
 | /card-stats            | Show the latest projection metrics |
 
 | Flag                                  | Default | Purpose                                   |
@@ -132,7 +158,7 @@ Requires Node.js 22.19+ and Bun for repository development.
     bun x prettier --check .
     bun build index.ts --outdir dist --target node
 
-Current validation: 9 focused tests, strict type checking, linting, formatting, and production bundling.
+Current validation: 24 focused tests, strict type checking, linting, formatting, and production bundling.
 
 ## Releases
 

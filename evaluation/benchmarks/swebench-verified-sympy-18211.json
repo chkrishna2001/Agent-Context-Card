@@ -1,0 +1,65 @@
+{
+  "name": "SWE-bench Verified sympy 18211",
+  "model": "llama-cloud/gemma4:31b",
+  "thinking": "off",
+  "timeoutMs": 300000,
+  "noContextFiles": true,
+  "benchmark": {
+    "dataset": "SWE-bench/SWE-bench_Verified",
+    "split": "test",
+    "instanceId": "sympy__sympy-18211",
+    "difficulty": "15 min - 1 hour",
+    "timeoutSeconds": 1800,
+    "cacheLevel": "env"
+  },
+  "workspace": {
+    "type": "git",
+    "source": "https://github.com/sympy/sympy.git",
+    "cache": ".agent-context-card/git-cache/sympy.git",
+    "commit": "b4f1aa3540fe68d078d76e78ba59d022dd6df39f",
+    "timeoutMs": 300000
+  },
+  "variants": [
+    {
+      "name": "baseline",
+      "extension": false,
+      "sessionMode": "fresh"
+    },
+    {
+      "name": "card",
+      "extension": true,
+      "sessionMode": "fresh"
+    }
+  ],
+  "turns": [
+    {
+      "name": "plan",
+      "prompt": "Plan sympy__sympy-18211. Inspect the repository and produce a concise implementation and validation plan. Do not modify files. Issue: `solveset` raises `NotImplementedError` instead of returning `ConditionSet`. `Eq(n*cos(n) - 3*sin(n), 0).as_set()` should return `ConditionSet(n, Eq(n*cos(n) - 3*sin(n), 0), Reals)` rather than raising.",
+      "expect": {
+        "taskId": "sympy__sympy-18211",
+        "resume": false,
+        "zeroHotEvidence": false
+      }
+    },
+    {
+      "name": "implement",
+      "prompt": "Implement sympy__sympy-18211 with a minimal production fix. Issue: `solveset` raises `NotImplementedError` instead of returning `ConditionSet`. `Eq(n*cos(n) - 3*sin(n), 0).as_set()` should return `ConditionSet(n, Eq(n*cos(n) - 3*sin(n), 0), Reals)` rather than raising. Inspect current source before editing and run the most relevant focused test available.",
+      "expect": {
+        "taskId": "sympy__sympy-18211",
+        "resume": true,
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    },
+    {
+      "name": "review",
+      "prompt": "Review sympy__sympy-18211 against the issue. Inspect the current diff and run only a bounded direct reproduction or one focused test; do not run broad suites or install dependencies. Fix only correctness problems you find. The official benchmark harness will perform final grading.",
+      "expect": {
+        "taskId": "sympy__sympy-18211",
+        "resume": true,
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    }
+  ]
+}

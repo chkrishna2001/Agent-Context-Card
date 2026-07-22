@@ -17,6 +17,10 @@
     "LICENSE"
   ],
   "scripts": {
+    "eval:pi": "node scripts/evaluation/run.mjs --config evaluation/configs/pi-cross-session-smoke.json",
+    "eval:swebench:pilot": "node scripts/evaluation/run.mjs --config evaluation/benchmarks/swebench-verified-sympy-18211.json",
+    "eval:swebench:pilot2": "node scripts/evaluation/run.mjs --config evaluation/benchmarks/swebench-verified-sympy-21930.json",
+    "grade:swebench": "node scripts/evaluation/grade-swebench.mjs",
     "setup:hooks": "node scripts/setup-hooks.mjs",
     "validate:release": "node scripts/validate-release.mjs",
     "prepublishOnly": "node scripts/guard-publish.mjs"

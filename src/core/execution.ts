@@ -58,19 +58,20 @@ function actionSummary(call: ToolCall): string {
   return `${call.name} ${value}`;
 }
 
+export function isMutationToolName(name: string): boolean {
+  return [
+    "edit",
+    "write",
+    "apply_patch",
+    "write_to_file",
+    "replace_file_content",
+    "multi_replace_file_content",
+  ].includes(name.toLocaleLowerCase());
+}
+
 function executionKind(call: ToolCall): ExecutionKind {
   const name = call.name.toLocaleLowerCase();
-  if (
-    [
-      "edit",
-      "write",
-      "apply_patch",
-      "write_to_file",
-      "replace_file_content",
-      "multi_replace_file_content",
-    ].includes(name)
-  )
-    return "change";
+  if (isMutationToolName(name)) return "change";
   const command =
     typeof call.arguments.command === "string" ? call.arguments.command : "";
   if (

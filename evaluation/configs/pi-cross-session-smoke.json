@@ -1,0 +1,82 @@
+{
+  "name": "Pi cross-session continuity smoke",
+  "model": "llama-cloud/gemma4:31b",
+  "thinking": "off",
+  "timeoutMs": 300000,
+  "noContextFiles": true,
+  "workspace": {
+    "type": "copy",
+    "source": "evaluation/fixtures/counter"
+  },
+  "variants": [
+    {
+      "name": "baseline",
+      "extension": false,
+      "sessionMode": "fresh"
+    },
+    {
+      "name": "card",
+      "extension": true,
+      "sessionMode": "fresh"
+    }
+  ],
+  "turns": [
+    {
+      "name": "plan",
+      "prompt": "Plan ACCEVAL-101. Inspect counter.mjs and counter.check.mjs. The increment function must add one without exceeding maximum. Do not modify files or run mutating commands. Return a concise numbered implementation and validation plan containing the exact marker PLAN-MARKER-ACCEVAL-101.",
+      "expect": {
+        "taskId": "ACCEVAL-101",
+        "resume": false,
+        "zeroHotEvidence": false,
+        "snapshotPlanContains": "PLAN-MARKER-ACCEVAL-101"
+      }
+    },
+    {
+      "name": "implement",
+      "prompt": "Implement ACCEVAL-101. Make increment(value, maximum) add one without exceeding maximum. Follow the previously approved plan, keep the change minimal, and run the relevant test.",
+      "expect": {
+        "taskId": "ACCEVAL-101",
+        "resume": true,
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    },
+    {
+      "name": "validate",
+      "prompt": "Validate ACCEVAL-101 with the repository test command. If it fails, diagnose and fix only the related problem, then rerun the test.",
+      "expect": {
+        "taskId": "ACCEVAL-101",
+        "resume": true,
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    },
+    {
+      "name": "unrelated",
+      "prompt": "New unrelated read-only task ACCEVAL-202: report the package name from package.json. Do not modify files.",
+      "expect": {
+        "taskId": "ACCEVAL-202",
+        "resume": false,
+        "zeroHotEvidence": true,
+        "noPlan": true
+      }
+    }
+  ],
+  "validation": [
+    {
+      "command": "node --test counter.check.mjs",
+      "expectedExitCode": 0,
+      "timeoutMs": 30000
+    }
+  ],
+  "fileAssertions": [
+    {
+      "path": "counter.mjs",
+      "exists": true
+    },
+    {
+      "path": "counter.check.mjs",
+      "exists": true
+    }
+  ]
+}

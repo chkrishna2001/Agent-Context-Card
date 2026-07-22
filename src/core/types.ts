@@ -1,6 +1,10 @@
 export const CARD_MESSAGE_TYPE = "agent-context-card";
 export const ANCHOR_ENTRY_TYPE = "agent-context-card-anchor";
 export const AUDIT_ENTRY_TYPE = "agent-context-card-audit";
+export const PLAN_ENTRY_TYPE = "agent-context-card-plan";
+export const RESUME_ENTRY_TYPE = "agent-context-card-resume";
+export const TASK_STATE_AUDIT_ENTRY_TYPE =
+  "agent-context-card-task-state-audit";
 
 export interface ToolCall {
   id: string;
@@ -33,6 +37,25 @@ export interface TaskAnchorDetails {
   reset: boolean;
 }
 
+export interface PinnedPlan {
+  content: string;
+  revision: number;
+  sourceTurn: number;
+  capturedAt: string;
+}
+
+export interface PlanCandidate {
+  content: string;
+  sourceTurn: number;
+  capturedAt: string;
+}
+
+export interface PlanStateDetails {
+  taskId?: string;
+  plan?: PinnedPlan;
+  candidate?: PlanCandidate;
+}
+
 export interface ProjectCapabilities {
   projectType?: string;
   packageName?: string;
@@ -61,6 +84,40 @@ export interface RuntimeCard {
   latestRequest?: string;
   capabilities: ProjectCapabilities;
   execution: ExecutionJournal;
+  plan?: PinnedPlan;
+  resumed?: {
+    execution: ExecutionJournal;
+    repositoryChanged: boolean;
+  };
+}
+
+export interface RepositoryProvenance {
+  root: string;
+  head?: string;
+  worktree: string;
+}
+
+export interface TaskSnapshot {
+  schemaVersion: 1;
+  taskId: string;
+  anchor: TaskAnchor;
+  plan?: PinnedPlan;
+  candidate?: PlanCandidate;
+  execution: ExecutionJournal;
+  provenance: RepositoryProvenance;
+  updatedAt: string;
+}
+
+export interface TaskStateAudit {
+  operation: "load" | "save" | "close" | "gc";
+  status: "success" | "missing" | "corrupt" | "failed";
+  taskId?: string;
+  detail?: string;
+  timestamp: string;
+}
+
+export interface ResumeStateDetails {
+  snapshot: TaskSnapshot;
 }
 
 export interface EvidenceLease {
@@ -103,6 +160,14 @@ export interface ProjectionAudit {
   retiredTurns: number;
   retired: RetirementCounts;
   hotEvidence: EvidenceLease[];
+  continuity?: {
+    taskId?: string;
+    planRevision?: number;
+    planChars: number;
+    resumedChanges: number;
+    resumedFailures: number;
+    repositoryChanged: boolean;
+  };
 }
 
 export const emptyAnchor = (): TaskAnchor => ({

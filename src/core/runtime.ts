@@ -3,10 +3,13 @@ import { buildExecutionJournal } from "./execution";
 import { buildProjectCapabilities } from "./project";
 import type { ContextMessage, RuntimeCard } from "./types";
 
+type ContinuityState = Pick<RuntimeCard, "plan" | "resumed">;
+
 export function buildRuntimeCard(
   cwd: string,
   goal: string,
   messages: ContextMessage[],
+  continuity: ContinuityState = {},
 ): RuntimeCard {
   const latestRequest = messages
     .filter((message) => message.role === "user")
@@ -18,5 +21,6 @@ export function buildRuntimeCard(
     latestRequest,
     capabilities: buildProjectCapabilities(cwd),
     execution: buildExecutionJournal(messages),
+    ...continuity,
   };
 }

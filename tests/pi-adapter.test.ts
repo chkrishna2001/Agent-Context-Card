@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
   ExtensionAPI,
@@ -11,11 +14,12 @@ import { scopeMessagesToGoal } from "../src/pi/normalize";
 
 type Handler = (...args: any[]) => any;
 
-function harness() {
+function harness(cwd = process.cwd()) {
   const flags = new Map<string, string | boolean>();
   const handlers = new Map<string, Handler[]>();
   const tools: ToolDefinition[] = [];
   const entries: Array<{ customType: string; data: unknown }> = [];
+  const branch: any[] = [];
   const pi = {
     registerFlag(name: string, options: { default?: string | boolean }) {
       if (options.default !== undefined) flags.set(name, options.default);
@@ -23,16 +27,18 @@ function harness() {
     getFlag: (name: string) => flags.get(name),
     registerTool: (tool: ToolDefinition) => tools.push(tool),
     registerCommand() {},
-    appendEntry: (customType: string, data: unknown) =>
-      entries.push({ customType, data }),
+    appendEntry(customType: string, data: unknown) {
+      entries.push({ customType, data });
+      branch.push({ type: "custom", customType, data });
+    },
     on(event: string, handler: Handler) {
       handlers.set(event, [...(handlers.get(event) ?? []), handler]);
     },
   } as unknown as ExtensionAPI;
   agentContextCard(pi);
   const context = {
-    cwd: process.cwd(),
-    sessionManager: { getBranch: () => [] },
+    cwd,
+    sessionManager: { getBranch: () => branch },
     model: { provider: "test", id: "model", contextWindow: 128_000 },
     ui: { setStatus() {}, notify() {} },
   } as unknown as ExtensionContext;
@@ -42,6 +48,19 @@ function harness() {
     async start() {
       for (const handler of handlers.get("session_start") ?? [])
         await handler({}, context);
+    },
+    async input(text: string) {
+      for (const handler of handlers.get("input") ?? [])
+        await handler({ text }, context);
+      branch.push({
+        type: "message",
+        message: { role: "user", content: text, timestamp: Date.now() },
+      });
+    },
+    async turnEnd(message: AgentMessage) {
+      branch.push({ type: "message", message });
+      for (const handler of handlers.get("turn_end") ?? [])
+        await handler({ message, toolResults: [] }, context);
     },
     async project(messages: AgentMessage[]) {
       let output: { messages: AgentMessage[] } | undefined;
@@ -80,5 +99,35 @@ describe("Pi adapter", () => {
       { role: "user", content: "second task", timestamp: 3 },
     ] as AgentMessage[];
     expect(scopeMessagesToGoal(messages, "second task")).toEqual([messages[2]]);
+  });
+
+  test("automatically resumes an exact plan without a maintenance command", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-card-pi-"));
+    try {
+      const first = harness(cwd);
+      await first.start();
+      await first.input("Create a plan for JIRA-123");
+      await first.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "1. Inspect\n2. Implement" }],
+        stopReason: "stop",
+        timestamp: 2,
+      } as AgentMessage);
+
+      const second = harness(cwd);
+      await second.start();
+      await second.input("Implement JIRA-123 now");
+      const output = await second.project([
+        { role: "user", content: "Implement JIRA-123 now", timestamp: 3 },
+      ]);
+      expect(JSON.stringify(output?.messages[0])).toContain(
+        "PINNED PLAN (revision 1)",
+      );
+      expect(JSON.stringify(output?.messages[0])).toContain(
+        "1. Inspect\\n  2. Implement",
+      );
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });

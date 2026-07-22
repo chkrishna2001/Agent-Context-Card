@@ -1,0 +1,65 @@
+{
+  "name": "SWE-bench Verified sympy 21930",
+  "model": "llama-cloud/gemma4:31b",
+  "thinking": "off",
+  "timeoutMs": 300000,
+  "noContextFiles": true,
+  "benchmark": {
+    "dataset": "SWE-bench/SWE-bench_Verified",
+    "split": "test",
+    "instanceId": "sympy__sympy-21930",
+    "difficulty": "15 min - 1 hour",
+    "timeoutSeconds": 1800,
+    "cacheLevel": "env"
+  },
+  "workspace": {
+    "type": "git",
+    "source": "https://github.com/sympy/sympy.git",
+    "cache": ".agent-context-card/git-cache/sympy.git",
+    "commit": "de446c6d85f633271dfec1452f6f28ea783e293f",
+    "timeoutMs": 300000
+  },
+  "variants": [
+    {
+      "name": "baseline",
+      "extension": false,
+      "sessionMode": "fresh"
+    },
+    {
+      "name": "card",
+      "extension": true,
+      "sessionMode": "fresh"
+    }
+  ],
+  "turns": [
+    {
+      "name": "plan",
+      "prompt": "Plan sympy__sympy-21930. Inspect the repository and produce a concise implementation and validation plan. Do not modify files. Issue: LaTeX output in the secondquant module produces an invalid double superscript. For Commutator(Bd(Symbol(''0''))**2, B(Symbol(''0''))), output contains b^\\dagger_{0}^{2}; it should group the daggered operator as {b^\\dagger_{0}}^{2}.",
+      "expect": {
+        "taskId": "sympy__sympy-21930",
+        "resume": false,
+        "zeroHotEvidence": false
+      }
+    },
+    {
+      "name": "implement",
+      "prompt": "Implement sympy__sympy-21930 with a minimal production fix. Issue: LaTeX output in the secondquant module produces an invalid double superscript. For Commutator(Bd(Symbol(''0''))**2, B(Symbol(''0''))), output contains b^\\dagger_{0}^{2}; it should group the daggered operator as {b^\\dagger_{0}}^{2}. Inspect current source before editing and run the most relevant focused test available.",
+      "expect": {
+        "taskId": "sympy__sympy-21930",
+        "resume": true,
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    },
+    {
+      "name": "review",
+      "prompt": "Review sympy__sympy-21930 against the issue. Inspect the current diff and run only a bounded direct reproduction or one focused test; do not run broad suites or install dependencies. Fix only correctness problems you find. The official benchmark harness will perform final grading.",
+      "expect": {
+        "taskId": "sympy__sympy-21930",
+        "resume": true,
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    }
+  ]
+}

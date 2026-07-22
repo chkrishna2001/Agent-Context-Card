@@ -1,0 +1,8 @@
+{
+  "name": "agent-context-card-evaluation-counter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test counter.check.mjs"
+  }
+}
