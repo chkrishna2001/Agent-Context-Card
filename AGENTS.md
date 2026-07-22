@@ -257,6 +257,39 @@ Benchmark integrity rules learned from this pilot:
 - treat a missing official per-instance report as an evaluation error;
 - report official resolution and exact FAIL_TO_PASS/PASS_TO_PASS counts.
 
+## Second SWE-bench Verified pilot
+
+A completed `sympy__sympy-21930` rerun used
+`llama-cloud/gemma4:31b`, thinking off, across fresh planning,
+implementation, and review sessions.
+
+| Metric                 |   Baseline | Context card |      Change |
+| ---------------------- | ---------: | -----------: | ----------: |
+| Official result        | unresolved |   unresolved |       equal |
+| FAIL_TO_PASS pass/fail |        0/6 |          5/1 | card closer |
+| PASS_TO_PASS pass/fail |       45/0 |         45/0 |       equal |
+| Provider input tokens  |  1,094,429 |      286,995 |      -73.8% |
+| Provider requests      |         37 |           20 |      -45.9% |
+| Output tokens          |      4,975 |        2,195 |      -55.9% |
+| Tool calls             |         34 |           17 |      -50.0% |
+| Tool errors            |          4 |            0 |       -100% |
+| Duplicate calls        |         10 |            2 |      -80.0% |
+| Inference duration     |   555.43 s |     141.35 s |      -74.6% |
+
+Both submissions applied and preserved all 45 PASS_TO_PASS tests. The baseline
+made no production-code change. The card changed
+`sympy/physics/secondquant.py` and passed five of six FAIL_TO_PASS tests, but
+missed the required `AntiSymmetricTensor` LaTeX grouping in `test_Tensors`.
+This is a valid efficiency win and partial correctness improvement, but an
+official non-resolution. Across two official pilots, the card has one resolution
+and one non-resolution; do not report this as a pass-rate estimate.
+
+The first attempt at this task was invalid because the baseline timed out and
+the card exhausted its provider session allowance. Its diagnostic metrics are
+retained in `docs/automated-multisession-evaluation.md` and explicitly excluded
+from performance claims. The runner now counts provider errors separately and
+stops a variant after a provider-error response.
+
 ## What is proved so far
 
 The evidence supports:

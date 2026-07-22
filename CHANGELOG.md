@@ -27,6 +27,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A first real-repository pilot on sympy__sympy-18211: the card was officially
   resolved with 79.0% fewer provider-input tokens and 66.0% fewer tool calls;
   the no-extension baseline was unresolved.
+- A second official pilot on sympy__sympy-21930: both variants were unresolved,
+  while the card passed five of six FAIL_TO_PASS tests with 73.8% fewer
+  provider-input tokens and 50.0% fewer tool calls.
 
 ### Changed
 
@@ -37,6 +40,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   plan from implementation language that merely refers to an approved plan.
 - Benchmark submissions exclude private continuity state, and the Windows
   grader preserves LF patch transport into Linux evaluation containers.
+- Evaluation reports count provider errors separately from tool errors and stop
+  a variant after a provider failure instead of recording misleading later turns.
+- Interrupted benchmark metrics are retained as explicitly non-comparable
+  diagnostics for future reporting and methodology articles.
 
 ## [0.1.0] - 2026-07-20
 

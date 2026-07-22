@@ -77,6 +77,7 @@ export function analyzeTrace(text, durationMs = 0) {
   let toolResultChars = 0;
   let toolCalls = 0;
   let toolErrors = 0;
+  let providerErrors = 0;
   let compactions = 0;
   let retries = 0;
   let turns = 0;
@@ -99,6 +100,7 @@ export function analyzeTrace(text, durationMs = 0) {
     assistantChars += contentText(event.message.content).length;
     const reason = event.message.stopReason ?? "unknown";
     stopReasons[reason] = (stopReasons[reason] ?? 0) + 1;
+    if (reason === "error") providerErrors++;
     const requestUsage = emptyUsage();
     addUsage(requestUsage, event.message.usage);
     addUsage(usage, event.message.usage);
@@ -129,6 +131,7 @@ export function analyzeTrace(text, durationMs = 0) {
     ),
     toolCalls,
     toolErrors,
+    providerErrors,
     duplicateToolCalls: [...toolSignatures.values()].reduce(
       (total, count) => total + Math.max(0, count - 1),
       0,
@@ -190,6 +193,7 @@ export function aggregateTurns(turns) {
     maxRequestOutput: 0,
     toolCalls: 0,
     toolErrors: 0,
+    providerErrors: 0,
     duplicateToolCalls: 0,
     tools,
     stopReasons,
@@ -216,6 +220,7 @@ export function aggregateTurns(turns) {
     for (const key of [
       "toolCalls",
       "toolErrors",
+      "providerErrors",
       "duplicateToolCalls",
       "compactions",
       "retries",

@@ -142,6 +142,25 @@ describe("evaluation metrics", () => {
     expect(parsed.records).toHaveLength(1);
     expect(parsed.errors[0].line).toBe(2);
   });
+
+  test("counts provider failures separately from tool failures", () => {
+    const trace = analyzeTrace(
+      lines([
+        {
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "429 session usage limit",
+            usage: {},
+          },
+        },
+      ]),
+    );
+    expect(trace.providerErrors).toBe(1);
+    expect(trace.toolErrors).toBe(0);
+    expect(aggregateTurns([{ trace }]).providerErrors).toBe(1);
+  });
 });
 
 describe("SWE-bench evaluation", () => {

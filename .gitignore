@@ -4,3 +4,5 @@ dist/
 .DS_Store
 *.tsbuildinfo
 .agent-context-card/
+__pycache__/
+*.pyc

@@ -397,13 +397,13 @@ function markdownReport(report) {
     "",
     `Generated: ${report.generatedAt}`,
     "",
-    "| Variant | Correct | Requests | Provider input | Output | Cache read | Cache write | Cost | Tools | Errors | Duplicates | Duration |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Variant | Correct | Requests | Provider input | Output | Cache read | Cache write | Cost | Tools | Tool errors | Provider errors | Duplicates | Duration |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const run of report.runs) {
     const metric = run.aggregate;
     lines.push(
-      `| ${run.name} | ${run.correct === undefined ? "ungraded" : run.correct ? "yes" : "no"} | ${metric.providerRequests} | ${metric.usage.providerInput} | ${metric.usage.output} | ${metric.usage.cacheRead} | ${metric.usage.cacheWrite} | $${metric.usage.cost.total.toFixed(6)} | ${metric.toolCalls} | ${metric.toolErrors} | ${metric.duplicateToolCalls} | ${(metric.durationMs / 1000).toFixed(2)}s |`,
+      `| ${run.name} | ${run.correct === undefined ? "ungraded" : run.correct ? "yes" : "no"} | ${metric.providerRequests} | ${metric.usage.providerInput} | ${metric.usage.output} | ${metric.usage.cacheRead} | ${metric.usage.cacheWrite} | $${metric.usage.cost.total.toFixed(6)} | ${metric.toolCalls} | ${metric.toolErrors} | ${metric.providerErrors} | ${metric.duplicateToolCalls} | ${(metric.durationMs / 1000).toFixed(2)}s |`,
     );
   }
   lines.push("", "## Per-turn metrics", "");
@@ -411,12 +411,12 @@ function markdownReport(report) {
     lines.push(
       `### ${run.name}`,
       "",
-      "| Turn | Requests | Provider input | Output | Tools | Errors | Duration | Card chars | Projected tokens | Hot evidence | Plan rev. |",
-      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+      "| Turn | Requests | Provider input | Output | Tools | Tool errors | Provider errors | Duration | Card chars | Projected tokens | Hot evidence | Plan rev. |",
+      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     );
     for (const turn of run.turns)
       lines.push(
-        `| ${turn.name} | ${turn.trace.providerRequests} | ${turn.trace.usage.providerInput} | ${turn.trace.usage.output} | ${turn.trace.toolCalls} | ${turn.trace.toolErrors} | ${(turn.trace.durationMs / 1000).toFixed(2)}s | ${turn.audit.maxCardChars || "—"} | ${turn.audit.maxEstimatedProjectedTokens || "—"} | ${turn.audit.maxHotEvidence || 0} | ${turn.audit.planRevisions.join(", ") || "—"} |`,
+        `| ${turn.name} | ${turn.trace.providerRequests} | ${turn.trace.usage.providerInput} | ${turn.trace.usage.output} | ${turn.trace.toolCalls} | ${turn.trace.toolErrors} | ${turn.trace.providerErrors} | ${(turn.trace.durationMs / 1000).toFixed(2)}s | ${turn.audit.maxCardChars || "—"} | ${turn.audit.maxEstimatedProjectedTokens || "—"} | ${turn.audit.maxHotEvidence || 0} | ${turn.audit.planRevisions.join(", ") || "—"} |`,
       );
     lines.push("");
   }
@@ -595,6 +595,7 @@ async function main() {
         if (
           result.exitCode !== 0 ||
           result.timedOut ||
+          turnResult.trace.providerErrors > 0 ||
           turnResult.trace.jsonErrors.length > 0
         )
           break;
@@ -629,6 +630,8 @@ async function main() {
       const assertionsPass = turns.every(
         (turn) =>
           turn.process.exitCode === 0 &&
+          !turn.process.timedOut &&
+          turn.trace.providerErrors === 0 &&
           turn.trace.jsonErrors.length === 0 &&
           turn.assertions.every((assertion) => assertion.pass),
       );

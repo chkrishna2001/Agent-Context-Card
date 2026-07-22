@@ -140,6 +140,70 @@ The pilot also hardened the benchmark infrastructure:
 - missing official reports fail grading rather than appearing unresolved;
 - exact resolved, FAIL_TO_PASS, and PASS_TO_PASS counts are retained.
 
+## Interrupted second SWE-bench attempt
+
+On 2026-07-21, an attempted run of `sympy__sympy-21930` with the same model
+did not complete and is retained only as a diagnostic record. It must not be
+used as an A/B result in the README, articles, or aggregate claims.
+
+| Metric                | Baseline | Context card |
+| --------------------- | -------: | -----------: |
+| Sessions recorded     |      1/3 |          3/3 |
+| Provider requests     |        7 |           22 |
+| Provider input tokens |   87,899 |      152,529 |
+| Output tokens         |      454 |          422 |
+| Tool calls            |        7 |           10 |
+| Tool errors           |        1 |            0 |
+| Provider errors       |        0 |           12 |
+| Duplicate calls       |        0 |            4 |
+| Inference duration    | 301.27 s |     205.86 s |
+
+The baseline timed out during its planning session after creating only a
+reproduction helper, with no production-code change. The card planning session
+then exhausted the Ollama Cloud session allowance: four HTTP 429 responses ended
+that session without a final plan, and the implementation and review sessions
+each received four more HTTP 429 responses. Consequently, the card captured no
+plan and produced an empty patch. The apparent differences above combine a
+timeout with quota exhaustion and are not comparable performance measurements.
+
+This attempt motivated an evaluation-harness rule: an assistant message with a
+provider `error` stop reason is counted separately from tool errors, fails the
+turn, and prevents later sessions in that variant from running. Raw traces and
+full reports remain under the ignored `.agent-context-card/e/` directory.
+
+## Second SWE-bench Verified pilot
+
+A completed rerun of `sympy__sympy-21930` on 2026-07-22 used the same
+`llama-cloud/gemma4:31b` model, thinking disabled, across fresh planning,
+implementation, and review sessions. Both variants completed all sessions
+without provider errors, and every card continuity assertion passed.
+
+| Metric                 |   Baseline | Context card |      Change |
+| ---------------------- | ---------: | -----------: | ----------: |
+| Official resolution    | unresolved |   unresolved |       equal |
+| FAIL_TO_PASS pass/fail |        0/6 |          5/1 | card closer |
+| PASS_TO_PASS pass/fail |       45/0 |         45/0 |       equal |
+| Provider input tokens  |  1,094,429 |      286,995 |      -73.8% |
+| Provider requests      |         37 |           20 |      -45.9% |
+| Output tokens          |      4,975 |        2,195 |      -55.9% |
+| Tool calls             |         34 |           17 |      -50.0% |
+| Tool errors            |          4 |            0 |       -100% |
+| Duplicate calls        |         10 |            2 |      -80.0% |
+| Inference duration     |   555.43 s |     141.35 s |      -74.6% |
+
+The baseline added only reproduction helpers and made no production-code
+change. The card patched `sympy/physics/secondquant.py`, and the official
+evaluator applied both submissions successfully. The card passed five of the six
+FAIL_TO_PASS tests and all 45 PASS_TO_PASS tests, but remained unresolved because
+`test_Tensors` still failed: the implementation grouped boson and fermion
+creation operators but missed the required `AntiSymmetricTensor` LaTeX grouping.
+
+This is valid negative evidence. It shows a large efficiency improvement and a
+substantial movement toward the correct patch, but it is not a resolved
+benchmark result and must not be presented as a pass. Together with the first
+pilot, the two official outcomes are one card resolution and one shared
+non-resolution; two tasks are far too few for a pass-rate claim.
+
 ## Extending the evaluation
 
 The runner supports copied fixtures and pinned Git workspaces. A configuration
