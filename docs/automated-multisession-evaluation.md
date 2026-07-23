@@ -11,7 +11,10 @@ Run the checked-in smoke evaluation with:
 
 Results are written below `.agent-context-card/e/`, which is intentionally
 gitignored because traces can contain prompts, model responses, and source
-content. The checked-in configuration is
+content. Sanitized, claimable headline metrics and explicitly excluded
+diagnostics are retained in
+`evaluation/results/evidence-ledger.json`; tests recompute every published
+percentage from its raw counts. The checked-in configuration is
 `evaluation/configs/pi-cross-session-smoke.json`.
 
 ## Protocol
@@ -47,7 +50,8 @@ The JSON report retains per-turn and aggregate measurements for:
 - provider requests and input, output, reasoning, cache-read, cache-write, and
   total tokens;
 - reported provider cost and per-request maxima;
-- tool calls, tool errors, exact duplicate signatures, and tool names;
+- tool calls, tool errors, raw exact repeated signatures, state-aware repeated
+  signatures, and tool names;
 - duration, exit status, timeouts, retries, compactions, and stop reasons;
 - assistant and tool-result characters;
 - session file bytes and entry counts;
@@ -204,11 +208,128 @@ benchmark result and must not be presented as a pass. Together with the first
 pilot, the two official outcomes are one card resolution and one shared
 non-resolution; two tasks are far too few for a pass-rate claim.
 
+## Ten-session mixed gate
+
+On 2026-07-22, the checked-in `pi-ten-turn-mixed.json` gate completed with the
+`ai-inference-router/mycoder` Pi routing configuration. It exercised two
+plan/implement/validate workflows, documentation, review, and two unrelated-task
+resets in fresh sessions.
+
+| Metric             | Baseline | Context card | Change |
+| ------------------ | -------: | -----------: | -----: |
+| Correctness        |     pass |         pass |  equal |
+| Provider requests  |       48 |           34 | -29.2% |
+| Tool calls         |       38 |           25 | -34.2% |
+| Tool errors        |        4 |            0 |  -100% |
+| Duplicate calls    |        3 |            0 |  -100% |
+| Inference duration | 183.48 s |     151.30 s | -17.5% |
+
+Both variants passed all six final tests and changed only `counter.mjs` and
+`README.md`. Their production files were byte-identical; documentation wording
+differed but described the same behavior. All card continuity assertions passed:
+plans resumed at revision 1, no file-read evidence crossed sessions, and both
+unrelated tasks inherited no prior plan.
+
+The router reported zero usage and cost fields, so token, output, cache, and cost
+comparisons are unavailable and stored as `null` in the evidence ledger. The
+configured route may select providers internally; the report identifies only
+`ai-inference-router/mycoder`, so it must not be described as evidence for a
+specific underlying model family.
+
+## GPT-5 Nano ten-session gate
+
+The same gate completed on 2026-07-22 with
+`ai-inference-router/openai/gpt-5-nano`, thinking configured off.
+
+| Metric                  | Baseline | Context card | Change |
+| ----------------------- | -------: | -----------: | -----: |
+| Correctness             |     pass |         pass |  equal |
+| Provider input tokens   |  189,460 |       78,395 | -58.6% |
+| Total tokens            |  218,673 |      108,409 | -50.4% |
+| Provider requests       |       64 |           44 | -31.3% |
+| Output tokens           |   29,213 |       30,014 |  +2.7% |
+| Reasoning tokens        |   23,782 |       25,856 |  +8.7% |
+| Tool calls              |       55 |           34 | -38.2% |
+| Tool errors             |        4 |            3 | -25.0% |
+| Raw repeated signatures |        1 |            5 |  +400% |
+| Same-state repeats      |        0 |            1 |    n/a |
+| Inference duration      | 381.24 s |     333.99 s | -12.4% |
+
+Both variants passed all six final tests, changed only `counter.mjs` and
+`README.md`, and all card continuity assertions passed. Their implementation
+styles differed: the baseline added unrequested non-finite-number handling,
+while the card made the smaller boundary-only change. This is a behavioral
+observation, not proof that one implementation generalizes better.
+
+The result is mixed beyond the headline savings. The card reduced provider
+input, total tokens, requests, tools, errors, and duration, but output and
+reasoning increased. The original raw-signature counter rose from one to five.
+Trace-level classification found that four card repeats were fresh file reads or
+test reruns after successful edits; the state-aware count was zero for baseline
+and one for the card, caused by a repeated malformed-path read. One additional
+card error was the expected failing test that led to a corrective edit. Thinking
+was configured off, but the provider still reported reasoning tokens; the report
+records both facts without inferring the provider's internal behavior.
+
+Raw repeated signatures remain in historical reports for reproducibility. The
+state-aware metric resets a file-read signature only after a successful mutation
+of that path, and resets command signatures after a successful mutation. It does
+not treat post-edit rereads or post-fix validation as same-state repetition.
+
+## GPT-5 Nano pooled three-pair result
+
+Three complete comparable pairs are available across two executions: the
+original pair above and the first two complete pairs from a fresh n=3 attempt.
+The fresh execution's one-hour outer ceiling interrupted its third card run, so
+that incomplete run is excluded; its complete third baseline is retained only as
+an unpaired diagnostic. Two later card recovery attempts ended after repeated
+provider `Connection error` responses and are also excluded.
+
+| Metric                | Paired median change |    Observed range |
+| --------------------- | -------------------: | ----------------: |
+| Provider input tokens |               -23.9% |   -58.6% to +5.1% |
+| Total tokens          |               -16.3% |   -50.4% to +9.0% |
+| Provider requests     |               -29.1% |  -31.3% to -10.2% |
+| Tool calls            |               -33.3% |  -38.2% to -12.5% |
+| Tool errors           |               -50.0% | -100.0% to -25.0% |
+| Cache-read tokens     |               -24.2% |   -63.9% to -5.3% |
+| Output tokens         |               +17.1% |   +2.7% to +23.9% |
+| Reasoning tokens      |               +24.7% |   +8.7% to +30.9% |
+| Inference duration    |                -0.4% |  -12.4% to +14.1% |
+
+All three baselines passed the complete protocol; two of three card runs passed.
+In the failed card run, all continuity assertions and all six production tests
+passed, but the documentation turn returned a new plan instead of editing
+`README.md`, so the explicit file assertion failed. Its card contained the
+correct latest request plus the full approved plan, including the plan marker
+and implementation/validation headings. The response copied that plan structure.
+This is evidence of possible stale-plan dominance for Nano, not missing task
+context. It invalidates any claim that correctness has never been worse with the
+card.
+
+Provider input fell in two pairs and rose 5.1% in one. Requests and tool calls
+fell in every pair, while output and provider-reported reasoning rose in every
+pair. Duration was effectively flat at the median. Raw repeat counts had medians
+of one for baseline and zero for card; same-state repeat medians were zero on
+both sides. The exact pair values and all excluded diagnostics are in the
+evidence ledger.
+
+The core plan lifecycle has not been changed from this single failure. The next
+controlled experiment should compare the existing full-plan projection against
+a deterministic phase-aware rendering or plan-retirement rule, with the README
+mutation and all continuity assertions as gates.
+
 ## Extending the evaluation
+
+Run the ten-session gate with `bun run eval:pi:ten-turn` or override its model
+through the runner CLI.
 
 The runner supports copied fixtures and pinned Git workspaces. A configuration
 can define model, thinking level, timeout, variants, ordered prompts, validation
-commands, file assertions, and continuity expectations. The next evidence gate
+commands, file assertions, and continuity expectations. `--repeats` now emits
+medians, ranges, correctness counts, and paired changes; `--variant` and
+`--repeat-start` can recover a missing repeat without rerunning completed work.
+Each completed run is checkpointed as `run.json`. The next evidence gate
 should use repeated runs, multiple model families, and pinned SWE-bench or
 SWE-Bench-CL tasks. This smoke fixture is automation proof, not a production or
 general benchmark claim.

@@ -114,11 +114,11 @@ The passive Pi adapter registers zero tools. A future change that registers a to
 
 Current size:
 
-- 1,661 TypeScript source lines;
+- 1,793 TypeScript source lines;
 - approximately 40 KB bundled;
 - two Pi peer dependencies;
 - zero runtime dependencies;
-- twenty-four focused tests.
+- thirty-two focused tests.
 
 There is no copied pi-dcp source or runtime dependency. pi-dcp contributed only conceptual context-hook and tool-pairing ancestry.
 
@@ -290,6 +290,93 @@ retained in `docs/automated-multisession-evaluation.md` and explicitly excluded
 from performance claims. The runner now counts provider errors separately and
 stops a variant after a provider-error response.
 
+Sanitized claimable metrics and excluded diagnostics are stored in
+`evaluation/results/evidence-ledger.json`. A regression test recalculates each
+published percentage from the raw counts so README and article figures have one
+machine-readable source.
+
+Local lifecycle expansion found a same-session boundary bug: after a settled
+planning turn, “Implement JIRA-789” was treated as a new task even though the
+exact task ID matched, erasing the promoted plan. Matching exact IDs now force
+continuation unless explicit unrelated-task language is present. Regression
+coverage includes interrupted planning, ten completed turns, and rewind/tree
+reconstruction.
+
+## Ten-session mixed proof
+
+On 2026-07-22, the `ai-inference-router/mycoder` Pi routing configuration
+completed the checked-in ten-session mixed gate.
+
+| Metric             | Baseline | Context card | Change |
+| ------------------ | -------: | -----------: | -----: |
+| Correctness        |     pass |         pass |  equal |
+| Provider requests  |       48 |           34 | -29.2% |
+| Tool calls         |       38 |           25 | -34.2% |
+| Tool errors        |        4 |            0 |  -100% |
+| Duplicate calls    |        3 |            0 |  -100% |
+| Inference duration | 183.48 s |     151.30 s | -17.5% |
+
+Both variants passed all six final tests and changed only `counter.mjs` and
+`README.md`; production output was byte-identical. Every card continuity
+assertion passed across two plan/implement/validate workflows, documentation,
+review, and unrelated-task resets. The router reported no token or cost usage,
+so those comparisons are unavailable. Because the route may choose providers
+internally and exposes only the `mycoder` alias, do not attribute this result to
+a specific underlying model family.
+
+## GPT-5 Nano ten-session proof
+
+The same mixed gate completed with
+`ai-inference-router/openai/gpt-5-nano`, thinking configured off.
+
+| Metric                  | Baseline | Context card | Change |
+| ----------------------- | -------: | -----------: | -----: |
+| Correctness             |     pass |         pass |  equal |
+| Provider input tokens   |  189,460 |       78,395 | -58.6% |
+| Total tokens            |  218,673 |      108,409 | -50.4% |
+| Provider requests       |       64 |           44 | -31.3% |
+| Output tokens           |   29,213 |       30,014 |  +2.7% |
+| Reasoning tokens        |   23,782 |       25,856 |  +8.7% |
+| Tool calls              |       55 |           34 | -38.2% |
+| Tool errors             |        4 |            3 | -25.0% |
+| Raw repeated signatures |        1 |            5 |  +400% |
+| Same-state repeats      |        0 |            1 |    n/a |
+| Inference duration      | 381.24 s |     333.99 s | -12.4% |
+
+Both variants passed all six tests and every card continuity assertion passed.
+The baseline added unrequested non-finite-number handling; the card made the
+smaller boundary-only production change. Output and reasoning increased. The
+raw repeated-signature counter rose from one to five, but trace analysis found
+four legitimate post-edit rereads or test reruns; same-state repeats were zero
+for baseline and one for the card, caused by a repeated malformed-path read.
+Thinking was configured off, but the provider still reported reasoning tokens.
+Preserve both the raw and state-aware metrics in future reports.
+
+### GPT-5 Nano pooled repetitions
+
+Three complete comparable pairs are available after pooling the original pair
+with two complete pairs from a fresh repeated execution. Paired median changes
+were -23.9% provider input, -16.3% total tokens, -29.1% requests, -33.3% tools,
+and -0.4% duration. The observed provider-input range was -58.6% to +5.1%, so
+input did not improve in every pair. Output rose in every pair (median +17.1%),
+as did provider-reported reasoning (median +24.7%).
+
+Baseline correctness was 3/3; card correctness was 2/3. The failed card run
+passed all six production tests and all continuity assertions but did not perform
+the requested README edit. Nano returned a new plan after receiving the correct
+latest request alongside the full pinned plan and its plan marker. Treat this as
+possible stale-plan dominance, not missing context, and do not claim that card
+correctness has never been worse. Do not change plan lifecycle from this single
+observation; test any phase-aware plan rendering or retirement rule as a
+controlled variant with the README mutation as a correctness gate.
+
+The fresh n=3 command exceeded its one-hour outer ceiling after three baselines,
+two cards, and one turn of the third card. A complete unpaired baseline is
+excluded from paired claims. Two fresh card recovery attempts ended with four
+consecutive provider `Connection error` responses and are excluded. The runner
+now checkpoints each completed run, reports repeated-run distributions, and can
+select a variant/repeat for recovery.
+
 ## What is proved so far
 
 The evidence supports:
@@ -307,7 +394,7 @@ This is a strong proof of concept.
 Do not call the package production-ready yet. The evidence does not establish:
 
 - reliability across many repositories;
-- behavior across multiple model families;
+- reliability across additional repositories, runs, and model families;
 - correctness in very long sessions;
 - resume, fork, undo, and tree-navigation robustness under live use;
 - equivalent savings in hosts without context replacement.

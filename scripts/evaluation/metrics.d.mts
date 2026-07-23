@@ -11,6 +11,8 @@ export function analyzeSession(text: string): any;
 export function analyzeSessionFiles(paths: string[]): Promise<any[]>;
 export function aggregateTurns(turns: any[]): any;
 export function summarizeAudits(sessions: any[]): any;
+export function distribution(values: number[]): any;
+export function summarizeRepeatedRuns(runs: any[]): any;
 export function percentChange(
   baseline: number,
   candidate: number,

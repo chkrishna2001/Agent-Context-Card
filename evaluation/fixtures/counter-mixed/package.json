@@ -1,0 +1,10 @@
+{
+  "name": "agent-context-card-evaluation-mixed-counter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test increment.check.mjs decrement.check.mjs",
+    "test:increment": "node --test increment.check.mjs",
+    "test:decrement": "node --test decrement.check.mjs"
+  }
+}

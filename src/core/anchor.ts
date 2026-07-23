@@ -1,3 +1,4 @@
+import { taskIdFromInput } from "./continuity";
 import { emptyAnchor, type TaskAnchor } from "./types";
 
 export type TaskBoundary = "continue" | "new";
@@ -43,7 +44,12 @@ export function taskBoundaryForInput(
   if (NEW_TASK.test(text)) return "new";
   if (!previous.settled || CONTINUATION.test(text)) return "continue";
 
-  const prior = terms(previous.latestRequest || previous.goal);
+  const priorText = previous.latestRequest || previous.goal;
+  const currentTaskId = taskIdFromInput(text);
+  if (currentTaskId && currentTaskId === taskIdFromInput(priorText))
+    return "continue";
+
+  const prior = terms(priorText);
   const overlap = [...terms(text)].filter((term) => prior.has(term)).length;
   return overlap >= 2 ? "continue" : "new";
 }

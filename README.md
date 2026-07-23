@@ -6,10 +6,11 @@ agent-context-card is a passive context-projection extension for Pi. It keeps ex
 
 > **Measured result:** 58.3% fewer provider input tokens in a four-turn Gemma A/B run, with 25% fewer tool calls and zero tool errors in the card-enabled session.
 >
-> **First SWE-bench Verified pilot:** the card resolved
-> sympy__sympy-18211 with 79.0% fewer provider-input tokens and 66.0% fewer
-> tool calls; the no-extension baseline was unresolved. This is one task, not a
-> pass-rate claim.
+> **Two SWE-bench Verified pilots:** on sympy__sympy-18211, the card resolved
+> the task with 79.0% fewer provider-input tokens while the baseline was
+> unresolved. On sympy__sympy-21930, both were unresolved, but the card passed
+> 5/6 FAIL_TO_PASS tests versus 0/6 for the baseline with 73.8% fewer input
+> tokens. Two tasks are not a pass-rate estimate.
 
 ## Why use it?
 
@@ -105,11 +106,49 @@ Run the isolated Pi baseline/card smoke test with:
 
     bun run eval:pi
 
+A checked-in ten-session mixed gate adds planning, implementation, validation,
+documentation, review, and unrelated-task boundaries:
+
+    bun run eval:pi:ten-turn
+
 It grades a real failing test, verifies workspace hashes and continuity
 invariants, and captures provider, tool, timing, session, projection, and task
 state metrics. The finalized live run preserved correctness while reducing
 provider input by 11.2%, requests by 18.8%, and tool calls by 25.0%; duration was
 effectively flat at 1.0% slower. See the [automated protocol and full result](docs/automated-multisession-evaluation.md).
+
+The ten-session mixed gate also passed on both sides with the
+`ai-inference-router/mycoder` route. The card used 29.2% fewer provider
+requests, 34.2% fewer tool calls, had zero versus four tool errors, and completed
+17.5% faster. The router did not report token usage, so no token comparison is
+claimed for this run.
+
+The first `openai/gpt-5-nano` pair passed on both sides: the card used 58.6%
+less provider input, 50.4% fewer total tokens, 31.3% fewer requests, and 38.2%
+fewer tool calls. Trace analysis later classified four of its five raw repeated
+signatures as valid post-edit rereads or revalidation; same-state repeats were
+zero for baseline and one for the card.
+
+Across three pooled Nano pairs, median card changes were -23.9% provider input,
+-29.1% requests, -33.3% tools, and -0.4% duration. Ranges were wide: provider
+input varied from -58.6% to +5.1%, while output and reported reasoning rose in
+every pair. Baseline correctness was 3/3 and card correctness was 2/3. The failed
+card run passed production tests and continuity checks but returned a plan
+instead of making the required README edit. This possible stale-plan-dominance
+failure is now an explicit experiment target, not hidden negative evidence.
+
+### Official SWE-bench Verified pilots
+
+| Task               | Baseline   | Context card | Card input change | Card tool change |
+| ------------------ | ---------- | ------------ | ----------------: | ---------------: |
+| sympy__sympy-18211 | unresolved | resolved     |            -79.0% |           -66.0% |
+| sympy__sympy-21930 | unresolved | unresolved   |            -73.8% |           -50.0% |
+
+For the second task, the card passed 5/6 FAIL_TO_PASS tests while the baseline
+passed 0/6; both preserved all 45 PASS_TO_PASS tests. This is useful negative
+evidence, not a card resolution. Exact counts, timings, excluded interrupted
+runs, and article-ready raw metrics are kept in the checked-in
+[evidence ledger](evaluation/results/evidence-ledger.json).
 
 ## Commands and configuration
 
@@ -158,7 +197,7 @@ Requires Node.js 22.19+ and Bun for repository development.
     bun x prettier --check .
     bun build index.ts --outdir dist --target node
 
-Current validation: 24 focused tests, strict type checking, linting, formatting, and production bundling.
+Current validation: 30 focused tests, strict type checking, linting, formatting, and production bundling.
 
 ## Releases
 
@@ -166,6 +205,8 @@ Releases are published to npm only from version tags after CI and changelog vali
 
 ## Status
 
-**Research preview.** The evidence is a strong proof of concept. Clean-fixture, longer-session, resume/fork, and multi-model release gates remain before a production-ready claim.
+**Research preview.** The evidence is a strong proof of concept. Repeated
+broader-repository runs and live fork/interruption/tree-navigation gates remain
+before a production-ready claim.
 
 Licensed under MIT.

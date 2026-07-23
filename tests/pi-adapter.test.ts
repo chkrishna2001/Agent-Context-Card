@@ -45,8 +45,16 @@ function harness(cwd = process.cwd()) {
   return {
     tools,
     entries,
+    branch: () => [...branch],
+    replaceBranch(entries: any[]) {
+      branch.splice(0, branch.length, ...entries);
+    },
     async start() {
       for (const handler of handlers.get("session_start") ?? [])
+        await handler({}, context);
+    },
+    async tree() {
+      for (const handler of handlers.get("session_tree") ?? [])
         await handler({}, context);
     },
     async input(text: string) {
@@ -99,6 +107,66 @@ describe("Pi adapter", () => {
       { role: "user", content: "second task", timestamp: 3 },
     ] as AgentMessage[];
     expect(scopeMessagesToGoal(messages, "second task")).toEqual([messages[2]]);
+  });
+
+  test("an interrupted planning turn is not promoted as a plan", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Create a plan for JIRA-456");
+    await extension.turnEnd({
+      role: "assistant",
+      content: [{ type: "text", text: "1. Incomplete draft" }],
+      stopReason: "aborted",
+      timestamp: 2,
+    } as AgentMessage);
+    await extension.input("Implement JIRA-456 now");
+    const output = await extension.project([
+      { role: "user", content: "Implement JIRA-456 now", timestamp: 3 },
+    ]);
+    expect(JSON.stringify(output?.messages[0])).not.toContain("PINNED PLAN");
+  });
+
+  test("tree reconstruction restores the selected branch plan state", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-card-tree-"));
+    try {
+      const extension = harness(cwd);
+      await extension.start();
+      await extension.input("Create a plan for JIRA-789");
+      await extension.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "1. Inspect\n2. Implement" }],
+        stopReason: "stop",
+        timestamp: 2,
+      } as AgentMessage);
+      const planningBranch = extension.branch();
+
+      await extension.input("Implement JIRA-789 now");
+      let output = await extension.project([
+        { role: "user", content: "Implement JIRA-789 now", timestamp: 3 },
+      ]);
+      expect(JSON.stringify(output?.messages[0])).toContain(
+        "PINNED PLAN (revision 1)",
+      );
+
+      extension.replaceBranch(planningBranch);
+      await extension.tree();
+      await extension.input("Implement JIRA-789 after tree navigation");
+      output = await extension.project([
+        {
+          role: "user",
+          content: "Implement JIRA-789 after tree navigation",
+          timestamp: 4,
+        },
+      ]);
+      expect(JSON.stringify(output?.messages[0])).toContain(
+        "PINNED PLAN (revision 1)",
+      );
+      expect(JSON.stringify(output?.messages[0])).toContain(
+        "1. Inspect\\n  2. Implement",
+      );
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 
   test("automatically resumes an exact plan without a maintenance command", async () => {

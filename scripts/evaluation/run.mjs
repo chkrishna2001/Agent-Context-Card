@@ -18,6 +18,7 @@ import {
   analyzeTrace,
   percentChange,
   summarizeAudits,
+  summarizeRepeatedRuns,
 } from "./metrics.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -391,19 +392,25 @@ async function validateWorkspace(workspace, validations = [], assertions = []) {
   };
 }
 
+function formatDistribution(value, suffix = "") {
+  if (!value || value.count === 0) return "n/a";
+  const format = (number) => `${Number(number.toFixed(1))}${suffix}`;
+  return `${format(value.median)} (${format(value.min)} to ${format(value.max)})`;
+}
+
 function markdownReport(report) {
   const lines = [
     `# ${report.name}`,
     "",
     `Generated: ${report.generatedAt}`,
     "",
-    "| Variant | Correct | Requests | Provider input | Output | Cache read | Cache write | Cost | Tools | Tool errors | Provider errors | Duplicates | Duration |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Variant | Correct | Requests | Provider input | Output | Cache read | Cache write | Cost | Tools | Tool errors | Provider errors | Raw repeats | Same-state repeats | Duration |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const run of report.runs) {
     const metric = run.aggregate;
     lines.push(
-      `| ${run.name} | ${run.correct === undefined ? "ungraded" : run.correct ? "yes" : "no"} | ${metric.providerRequests} | ${metric.usage.providerInput} | ${metric.usage.output} | ${metric.usage.cacheRead} | ${metric.usage.cacheWrite} | $${metric.usage.cost.total.toFixed(6)} | ${metric.toolCalls} | ${metric.toolErrors} | ${metric.providerErrors} | ${metric.duplicateToolCalls} | ${(metric.durationMs / 1000).toFixed(2)}s |`,
+      `| ${run.name} | ${run.correct === undefined ? "ungraded" : run.correct ? "yes" : "no"} | ${metric.providerRequests} | ${metric.usage.providerInput} | ${metric.usage.output} | ${metric.usage.cacheRead} | ${metric.usage.cacheWrite} | $${metric.usage.cost.total.toFixed(6)} | ${metric.toolCalls} | ${metric.toolErrors} | ${metric.providerErrors} | ${metric.duplicateToolCalls} | ${metric.sameStateDuplicateToolCalls} | ${(metric.durationMs / 1000).toFixed(2)}s |`,
     );
   }
   lines.push("", "## Per-turn metrics", "");
@@ -417,6 +424,40 @@ function markdownReport(report) {
     for (const turn of run.turns)
       lines.push(
         `| ${turn.name} | ${turn.trace.providerRequests} | ${turn.trace.usage.providerInput} | ${turn.trace.usage.output} | ${turn.trace.toolCalls} | ${turn.trace.toolErrors} | ${turn.trace.providerErrors} | ${(turn.trace.durationMs / 1000).toFixed(2)}s | ${turn.audit.maxCardChars || "—"} | ${turn.audit.maxEstimatedProjectedTokens || "—"} | ${turn.audit.maxHotEvidence || 0} | ${turn.audit.planRevisions.join(", ") || "—"} |`,
+      );
+    lines.push("");
+  }
+  if (report.repeatSummary) {
+    lines.push("", "## Repeated-run distributions", "");
+    for (const [variant, summary] of Object.entries(
+      report.repeatSummary.variants,
+    ))
+      lines.push(
+        `- ${variant}: ${summary.correctness.passed}/${summary.runs} correct`,
+      );
+    lines.push(
+      "",
+      "Medians are followed by the observed minimum-to-maximum range.",
+      "",
+      "| Metric | Baseline | Context card | Paired card change |",
+      "| --- | ---: | ---: | ---: |",
+    );
+    const labels = {
+      providerInputTokens: "Provider input tokens",
+      totalTokens: "Total tokens",
+      outputTokens: "Output tokens",
+      reasoningTokens: "Reasoning tokens",
+      cacheReadTokens: "Cache-read tokens",
+      providerRequests: "Provider requests",
+      toolCalls: "Tool calls",
+      toolErrors: "Tool errors",
+      rawRepeatedSignatures: "Raw repeated signatures",
+      sameStateRepeatedSignatures: "Same-state repeated signatures",
+      durationMs: "Duration (ms)",
+    };
+    for (const [name, label] of Object.entries(labels))
+      lines.push(
+        `| ${label} | ${formatDistribution(report.repeatSummary.variants.baseline?.metrics[name])} | ${formatDistribution(report.repeatSummary.variants.card?.metrics[name])} | ${formatDistribution(report.repeatSummary.pairedChanges[name], "%")} |`,
       );
     lines.push("");
   }
@@ -452,7 +493,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.config)
     throw new Error(
-      "Usage: node scripts/evaluation/run.mjs --config <file> [--model provider/model] [--output <dir>]",
+      "Usage: node scripts/evaluation/run.mjs --config <file> [--model provider/model] [--output <dir>] [--repeats n] [--variant name] [--repeat-start n]",
     );
   const configPath = path.resolve(process.cwd(), args.config);
   const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -472,11 +513,21 @@ async function main() {
       path.join(".agent-context-card", "e", `${stamp}-${shortName}`),
   );
   await mkdir(outputRoot, { recursive: true });
-  const variants = config.variants ?? [
+  const configuredVariants = config.variants ?? [
     { name: "baseline", extension: false, sessionMode: "fresh" },
     { name: "card", extension: true, sessionMode: "fresh" },
   ];
+  const variants = args.variant
+    ? configuredVariants.filter((variant) => variant.name === args.variant)
+    : configuredVariants;
+  if (variants.length === 0)
+    throw new Error(`Unknown variant: ${String(args.variant)}`);
   const repeats = Number(args.repeats ?? config.repeats ?? 1);
+  const repeatStart = Number(args["repeat-start"] ?? 1);
+  if (!Number.isInteger(repeats) || repeats < 1)
+    throw new Error("Repeats must be a positive integer");
+  if (!Number.isInteger(repeatStart) || repeatStart < 1)
+    throw new Error("Repeat start must be a positive integer");
   const piCli = path.resolve(
     repositoryRoot,
     config.piCli ?? "node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
@@ -488,8 +539,12 @@ async function main() {
   const runs = [];
 
   for (const [variantIndex, variant] of variants.entries()) {
-    for (let repeat = 1; repeat <= repeats; repeat++) {
-      const name = repeats > 1 ? `${variant.name}-r${repeat}` : variant.name;
+    for (let offset = 0; offset < repeats; offset++) {
+      const repeat = repeatStart + offset;
+      const name =
+        repeats > 1 || repeatStart > 1
+          ? `${variant.name}-r${repeat}`
+          : variant.name;
       const variantRoot = path.join(
         outputRoot,
         `r${variantIndex + 1}-${repeat}`,
@@ -637,7 +692,7 @@ async function main() {
       );
       const hasCorrectnessChecks =
         validation.commands.length > 0 || validation.files.length > 0;
-      runs.push({
+      const runRecord = {
         name,
         variant: variant.name,
         repeat,
@@ -655,14 +710,20 @@ async function main() {
         correct: hasCorrectnessChecks
           ? validation.pass && assertionsPass
           : undefined,
-      });
+      };
+      runs.push(runRecord);
+      await writeFile(
+        path.join(variantRoot, "run.json"),
+        `${JSON.stringify(runRecord, null, 2)}\n`,
+      );
     }
   }
 
   const baseline = runs.find((run) => run.variant === "baseline");
   const card = runs.find((run) => run.variant === "card");
+  const repeatSummary = repeats > 1 ? summarizeRepeatedRuns(runs) : undefined;
   const comparison =
-    baseline && card
+    repeats === 1 && baseline && card
       ? {
           providerInput: percentChange(
             baseline.aggregate.usage.providerInput,
@@ -684,6 +745,14 @@ async function main() {
             baseline.aggregate.toolCalls,
             card.aggregate.toolCalls,
           ),
+          rawRepeatedSignatures: percentChange(
+            baseline.aggregate.duplicateToolCalls,
+            card.aggregate.duplicateToolCalls,
+          ),
+          sameStateRepeatedSignatures: percentChange(
+            baseline.aggregate.sameStateDuplicateToolCalls,
+            card.aggregate.sameStateDuplicateToolCalls,
+          ),
           duration: percentChange(
             baseline.aggregate.durationMs,
             card.aggregate.durationMs,
@@ -701,6 +770,7 @@ async function main() {
     benchmark: config.benchmark,
     runs,
     comparison,
+    repeatSummary,
   };
   await writeFile(
     path.join(outputRoot, "report.json"),

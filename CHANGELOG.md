@@ -30,6 +30,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A second official pilot on sympy__sympy-21930: both variants were unresolved,
   while the card passed five of six FAIL_TO_PASS tests with 73.8% fewer
   provider-input tokens and 50.0% fewer tool calls.
+- A checked-in evidence ledger with raw claimable metrics, excluded diagnostics,
+  official test counts, and regression-checked percentage calculations.
+- Regression coverage for ten completed turns, interrupted planning, and
+  session-tree reconstruction.
+- A checked-in ten-session mixed evaluation fixture and protocol covering two
+  implementation tasks, documentation, review, validation, and task isolation.
+- A passing live run of that gate through the `mycoder` routing configuration:
+  29.2% fewer requests, 34.2% fewer tool calls, zero versus four tool errors,
+  and 17.5% lower duration, with token usage unavailable.
+- A passing GPT-5 Nano run of the same gate: 58.6% less provider input, 50.4%
+  fewer total tokens, and 38.2% fewer tool calls, while output and reasoning
+  increased; trace analysis isolated one same-state repeated malformed read.
+- State-aware repeat metrics and repeated-run distribution reporting with
+  medians, ranges, correctness counts, and paired percentage changes.
+- A pooled three-pair GPT-5 Nano result: median reductions in provider input,
+  requests, and tools, but 2/3 card correctness after one documentation turn
+  returned a plan instead of editing README; provider aborts remain excluded.
+- Per-run evaluation checkpoints plus targeted `--variant` and
+  `--repeat-start` recovery controls for interrupted repeated gates.
 
 ### Changed
 
@@ -38,6 +57,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   preserves correctness.
 - Planning-intent detection now distinguishes requests to create or revise a
   plan from implementation language that merely refers to an approved plan.
+- Matching exact task IDs preserve same-session plan-to-implementation
+  continuity after a settled planning turn and across tree reconstruction.
 - Benchmark submissions exclude private continuity state, and the Windows
   grader preserves LF patch transport into Linux evaluation containers.
 - Evaluation reports count provider errors separately from tool errors and stop

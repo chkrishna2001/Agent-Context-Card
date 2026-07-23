@@ -14,6 +14,22 @@ function stableValue(value) {
   );
 }
 
+const MUTATING_TOOLS = new Set(["apply_patch", "edit", "write"]);
+
+function toolName(event) {
+  return String(event.toolName ?? "").toLowerCase();
+}
+
+function fileTarget(args = {}) {
+  const value = args.path ?? args.filePath ?? args.file_path;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return value.replaceAll("\\", "/").replace(/^\.\//, "");
+}
+
+function toolSignature(event) {
+  return `${event.toolName}:${JSON.stringify(stableValue(event.args ?? {}))}`;
+}
+
 function contentText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -71,6 +87,9 @@ export function analyzeTrace(text, durationMs = 0) {
   const usage = emptyUsage();
   const requests = [];
   const toolSignatures = new Map();
+  const signatureStates = new Map();
+  const fileVersions = new Map();
+  const pendingTools = new Map();
   const tools = {};
   const stopReasons = {};
   let assistantChars = 0;
@@ -81,6 +100,8 @@ export function analyzeTrace(text, durationMs = 0) {
   let compactions = 0;
   let retries = 0;
   let turns = 0;
+  let globalMutationVersion = 0;
+  let sameStateDuplicateToolCalls = 0;
 
   for (const event of records) {
     if (event.type === "turn_start") turns++;
@@ -89,8 +110,27 @@ export function analyzeTrace(text, durationMs = 0) {
     if (event.type === "tool_execution_start") {
       toolCalls++;
       tools[event.toolName] = (tools[event.toolName] ?? 0) + 1;
-      const signature = `${event.toolName}:${JSON.stringify(stableValue(event.args ?? {}))}`;
+      const signature = toolSignature(event);
       toolSignatures.set(signature, (toolSignatures.get(signature) ?? 0) + 1);
+      const target = fileTarget(event.args);
+      const state =
+        toolName(event) === "read" && target
+          ? `file:${target}:${fileVersions.get(target) ?? 0}`
+          : `global:${globalMutationVersion}`;
+      if (signatureStates.get(signature) === state)
+        sameStateDuplicateToolCalls++;
+      signatureStates.set(signature, state);
+      pendingTools.set(event.toolCallId, event);
+    }
+    if (event.type === "tool_execution_end") {
+      const start = pendingTools.get(event.toolCallId);
+      pendingTools.delete(event.toolCallId);
+      if (start && !event.isError && MUTATING_TOOLS.has(toolName(start))) {
+        globalMutationVersion++;
+        const target = fileTarget(start.args);
+        if (target)
+          fileVersions.set(target, (fileVersions.get(target) ?? 0) + 1);
+      }
     }
     if (event.type === "tool_execution_end" && event.isError) toolErrors++;
     if (event.type !== "message_end" || !event.message) continue;
@@ -136,6 +176,7 @@ export function analyzeTrace(text, durationMs = 0) {
       (total, count) => total + Math.max(0, count - 1),
       0,
     ),
+    sameStateDuplicateToolCalls,
     tools,
     stopReasons,
     compactions,
@@ -195,6 +236,7 @@ export function aggregateTurns(turns) {
     toolErrors: 0,
     providerErrors: 0,
     duplicateToolCalls: 0,
+    sameStateDuplicateToolCalls: 0,
     tools,
     stopReasons,
     compactions: 0,
@@ -222,6 +264,7 @@ export function aggregateTurns(turns) {
       "toolErrors",
       "providerErrors",
       "duplicateToolCalls",
+      "sameStateDuplicateToolCalls",
       "compactions",
       "retries",
       "assistantChars",
@@ -301,4 +344,83 @@ export function summarizeAudits(sessions) {
 export function percentChange(baseline, candidate) {
   if (!baseline) return undefined;
   return ((candidate - baseline) / baseline) * 100;
+}
+
+export function distribution(values) {
+  const sorted = values
+    .filter((value) => typeof value === "number" && Number.isFinite(value))
+    .toSorted((left, right) => left - right);
+  if (sorted.length === 0)
+    return { count: 0, min: null, max: null, mean: null, median: null };
+  const middle = Math.floor(sorted.length / 2);
+  const median =
+    sorted.length % 2 === 0
+      ? (sorted[middle - 1] + sorted[middle]) / 2
+      : sorted[middle];
+  return {
+    count: sorted.length,
+    min: sorted[0],
+    max: sorted.at(-1),
+    mean: sorted.reduce((total, value) => total + value, 0) / sorted.length,
+    median,
+  };
+}
+
+const REPEAT_METRICS = {
+  providerInputTokens: (run) => run.aggregate.usage.providerInput,
+  totalTokens: (run) => run.aggregate.usage.totalTokens,
+  outputTokens: (run) => run.aggregate.usage.output,
+  reasoningTokens: (run) => run.aggregate.usage.reasoning,
+  cacheReadTokens: (run) => run.aggregate.usage.cacheRead,
+  providerRequests: (run) => run.aggregate.providerRequests,
+  toolCalls: (run) => run.aggregate.toolCalls,
+  toolErrors: (run) => run.aggregate.toolErrors,
+  rawRepeatedSignatures: (run) => run.aggregate.duplicateToolCalls,
+  sameStateRepeatedSignatures: (run) =>
+    run.aggregate.sameStateDuplicateToolCalls,
+  durationMs: (run) => run.aggregate.durationMs,
+};
+
+export function summarizeRepeatedRuns(runs) {
+  const variantNames = [...new Set(runs.map((run) => run.variant))];
+  const variants = {};
+  for (const variant of variantNames) {
+    const selected = runs.filter((run) => run.variant === variant);
+    variants[variant] = {
+      runs: selected.length,
+      correctness: {
+        passed: selected.filter((run) => run.correct === true).length,
+        failed: selected.filter((run) => run.correct === false).length,
+        ungraded: selected.filter((run) => run.correct === undefined).length,
+      },
+      metrics: Object.fromEntries(
+        Object.entries(REPEAT_METRICS).map(([name, read]) => [
+          name,
+          distribution(selected.map(read)),
+        ]),
+      ),
+    };
+  }
+  const baseline = new Map(
+    runs
+      .filter((run) => run.variant === "baseline")
+      .map((run) => [run.repeat, run]),
+  );
+  const card = new Map(
+    runs
+      .filter((run) => run.variant === "card")
+      .map((run) => [run.repeat, run]),
+  );
+  const pairedChanges = {};
+  for (const [name, read] of Object.entries(REPEAT_METRICS)) {
+    const changes = [];
+    for (const [repeat, baselineRun] of baseline) {
+      const cardRun = card.get(repeat);
+      if (!cardRun) continue;
+      const change = percentChange(read(baselineRun), read(cardRun));
+      if (change !== undefined) changes.push(change);
+    }
+    pairedChanges[name] = distribution(changes);
+  }
+  return { variants, pairedChanges };
 }

@@ -120,6 +120,22 @@ describe("context projection", () => {
     ]);
     expect(projected.retiredTurns).toBe(1);
   });
+
+  test("does not grow monotonically across ten completed turns", () => {
+    const messages = Array.from({ length: 10 }, (_, index) => [
+      user(`request ${index + 1}`),
+      assistant(`answer ${index + 1}`),
+    ]).flat();
+    const projected = projectContext(messages, 2);
+    expect(projected.messages).toEqual([
+      "request 9",
+      "answer 9",
+      "request 10",
+      "answer 10",
+    ]);
+    expect(projected.retiredTurns).toBe(8);
+    expect(projected.messages).toHaveLength(4);
+  });
 });
 
 describe("card extraction", () => {
@@ -185,6 +201,12 @@ describe("card extraction", () => {
 });
 
 test("task boundaries favor continuation while work is unsettled", () => {
+  expect(
+    taskBoundaryForInput("Implement JIRA-789 now", {
+      goal: "Create a plan for JIRA-789",
+      settled: true,
+    }),
+  ).toBe("continue");
   expect(
     taskBoundaryForInput("document it too", {
       goal: "fix export",

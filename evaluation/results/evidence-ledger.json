@@ -1,0 +1,464 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-22",
+  "sourceDocument": "docs/automated-multisession-evaluation.md",
+  "metricDefinitions": {
+    "duplicateCalls": "Raw exact repeated tool-call signatures; retained for compatibility with all historical reports.",
+    "sameStateDuplicateCalls": "Exact repeated signatures without a successful relevant file mutation or global mutation boundary; available for traces analyzed after 2026-07-22."
+  },
+  "results": [
+    {
+      "id": "four-turn-gemma",
+      "date": "2026-07-20",
+      "kind": "single-session-ab",
+      "claimable": true,
+      "model": "llama-cloud/gemma4:31b",
+      "thinking": "off",
+      "correctness": { "baseline": "pass", "card": "pass" },
+      "baseline": {
+        "providerInputTokens": 153360,
+        "providerRequests": 20,
+        "outputTokens": 1354,
+        "toolCalls": 16,
+        "toolErrors": 2,
+        "duplicateCalls": 1,
+        "durationMs": 133200
+      },
+      "card": {
+        "providerInputTokens": 63883,
+        "providerRequests": 16,
+        "outputTokens": 1005,
+        "toolCalls": 12,
+        "toolErrors": 0,
+        "duplicateCalls": 0,
+        "durationMs": 99000
+      },
+      "changePercent": {
+        "providerInputTokens": -58.3,
+        "providerRequests": -20,
+        "outputTokens": -25.8,
+        "toolCalls": -25,
+        "toolErrors": -100,
+        "duplicateCalls": -100,
+        "durationMs": -25.7
+      }
+    },
+    {
+      "id": "cross-session-smoke",
+      "date": "2026-07-21",
+      "kind": "cross-session-ab",
+      "claimable": true,
+      "model": "llama-cloud/gemma4:31b",
+      "thinking": "off",
+      "correctness": { "baseline": "pass", "card": "pass" },
+      "baseline": {
+        "providerInputTokens": 24457,
+        "providerRequests": 16,
+        "outputTokens": 615,
+        "toolCalls": 12,
+        "toolErrors": 0,
+        "duplicateCalls": 0,
+        "durationMs": 71140
+      },
+      "card": {
+        "providerInputTokens": 21717,
+        "providerRequests": 13,
+        "outputTokens": 491,
+        "toolCalls": 9,
+        "toolErrors": 0,
+        "duplicateCalls": 0,
+        "durationMs": 71860
+      },
+      "changePercent": {
+        "providerInputTokens": -11.2,
+        "providerRequests": -18.8,
+        "outputTokens": -20.2,
+        "toolCalls": -25,
+        "toolErrors": null,
+        "duplicateCalls": null,
+        "durationMs": 1
+      }
+    },
+    {
+      "id": "swebench-sympy-18211",
+      "date": "2026-07-21",
+      "kind": "swebench-verified",
+      "claimable": true,
+      "model": "llama-cloud/gemma4:31b",
+      "thinking": "off",
+      "correctness": {
+        "baseline": "unresolved",
+        "card": "resolved",
+        "baselineFailToPass": { "passed": 0, "failed": 1 },
+        "cardFailToPass": { "passed": 1, "failed": 0 },
+        "baselinePassToPass": { "passed": 54, "failed": 0 },
+        "cardPassToPass": { "passed": 54, "failed": 0 }
+      },
+      "baseline": {
+        "providerInputTokens": 1271160,
+        "providerRequests": 56,
+        "outputTokens": 4512,
+        "toolCalls": 53,
+        "toolErrors": 8,
+        "duplicateCalls": 4,
+        "durationMs": 439690
+      },
+      "card": {
+        "providerInputTokens": 267542,
+        "providerRequests": 21,
+        "outputTokens": 3322,
+        "toolCalls": 18,
+        "toolErrors": 0,
+        "duplicateCalls": 0,
+        "durationMs": 287950
+      },
+      "changePercent": {
+        "providerInputTokens": -79,
+        "providerRequests": -62.5,
+        "outputTokens": -26.4,
+        "toolCalls": -66,
+        "toolErrors": -100,
+        "duplicateCalls": -100,
+        "durationMs": -34.5
+      }
+    },
+    {
+      "id": "swebench-sympy-21930",
+      "date": "2026-07-22",
+      "kind": "swebench-verified",
+      "claimable": true,
+      "model": "llama-cloud/gemma4:31b",
+      "thinking": "off",
+      "correctness": {
+        "baseline": "unresolved",
+        "card": "unresolved",
+        "baselineFailToPass": { "passed": 0, "failed": 6 },
+        "cardFailToPass": { "passed": 5, "failed": 1 },
+        "baselinePassToPass": { "passed": 45, "failed": 0 },
+        "cardPassToPass": { "passed": 45, "failed": 0 }
+      },
+      "baseline": {
+        "providerInputTokens": 1094429,
+        "providerRequests": 37,
+        "outputTokens": 4975,
+        "toolCalls": 34,
+        "toolErrors": 4,
+        "duplicateCalls": 10,
+        "durationMs": 555430
+      },
+      "card": {
+        "providerInputTokens": 286995,
+        "providerRequests": 20,
+        "outputTokens": 2195,
+        "toolCalls": 17,
+        "toolErrors": 0,
+        "duplicateCalls": 2,
+        "durationMs": 141350
+      },
+      "changePercent": {
+        "providerInputTokens": -73.8,
+        "providerRequests": -45.9,
+        "outputTokens": -55.9,
+        "toolCalls": -50,
+        "toolErrors": -100,
+        "duplicateCalls": -80,
+        "durationMs": -74.6
+      }
+    },
+    {
+      "id": "ten-turn-mixed-mycoder",
+      "date": "2026-07-22",
+      "kind": "cross-session-ab",
+      "claimable": true,
+      "model": "ai-inference-router/mycoder",
+      "thinking": "off",
+      "usageReported": false,
+      "correctness": { "baseline": "pass", "card": "pass" },
+      "baseline": {
+        "providerInputTokens": null,
+        "providerRequests": 48,
+        "outputTokens": null,
+        "toolCalls": 38,
+        "toolErrors": 4,
+        "duplicateCalls": 3,
+        "durationMs": 183480
+      },
+      "card": {
+        "providerInputTokens": null,
+        "providerRequests": 34,
+        "outputTokens": null,
+        "toolCalls": 25,
+        "toolErrors": 0,
+        "duplicateCalls": 0,
+        "durationMs": 151300
+      },
+      "changePercent": {
+        "providerInputTokens": null,
+        "providerRequests": -29.2,
+        "outputTokens": null,
+        "toolCalls": -34.2,
+        "toolErrors": -100,
+        "duplicateCalls": -100,
+        "durationMs": -17.5
+      }
+    },
+    {
+      "id": "ten-turn-mixed-gpt-5-nano",
+      "date": "2026-07-22",
+      "kind": "cross-session-ab",
+      "claimable": true,
+      "model": "ai-inference-router/openai/gpt-5-nano",
+      "thinking": "off",
+      "correctness": { "baseline": "pass", "card": "pass" },
+      "baseline": {
+        "providerInputTokens": 189460,
+        "providerRequests": 64,
+        "outputTokens": 29213,
+        "cacheReadTokens": 148352,
+        "reasoningTokens": 23782,
+        "totalTokens": 218673,
+        "toolCalls": 55,
+        "toolErrors": 4,
+        "duplicateCalls": 1,
+        "sameStateDuplicateCalls": 0,
+        "durationMs": 381240
+      },
+      "card": {
+        "providerInputTokens": 78395,
+        "providerRequests": 44,
+        "outputTokens": 30014,
+        "cacheReadTokens": 53504,
+        "reasoningTokens": 25856,
+        "totalTokens": 108409,
+        "toolCalls": 34,
+        "toolErrors": 3,
+        "duplicateCalls": 5,
+        "sameStateDuplicateCalls": 1,
+        "durationMs": 333990
+      },
+      "changePercent": {
+        "providerInputTokens": -58.6,
+        "providerRequests": -31.3,
+        "outputTokens": 2.7,
+        "cacheReadTokens": -63.9,
+        "reasoningTokens": 8.7,
+        "totalTokens": -50.4,
+        "toolCalls": -38.2,
+        "toolErrors": -25,
+        "duplicateCalls": 400,
+        "sameStateDuplicateCalls": null,
+        "durationMs": -12.4
+      }
+    }
+  ],
+  "repeatedResults": [
+    {
+      "id": "ten-turn-mixed-gpt-5-nano-pooled-n3",
+      "date": "2026-07-22",
+      "kind": "pooled-paired-cross-session-ab",
+      "claimable": true,
+      "model": "ai-inference-router/openai/gpt-5-nano",
+      "thinking": "off",
+      "pooling": "Three complete comparable pairs: the original pair plus the first two complete pairs from the interrupted fresh n=3 execution.",
+      "correctness": {
+        "baselinePassed": 3,
+        "baselineFailed": 0,
+        "cardPassed": 2,
+        "cardFailed": 1,
+        "cardFailure": "The documentation turn returned a new plan instead of editing README.md; production tests passed but the explicit file assertion failed."
+      },
+      "pairs": [
+        {
+          "id": "original",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 189460,
+            "totalTokens": 218673,
+            "outputTokens": 29213,
+            "reasoningTokens": 23782,
+            "cacheReadTokens": 148352,
+            "providerRequests": 64,
+            "toolCalls": 55,
+            "toolErrors": 4,
+            "rawRepeatedSignatures": 1,
+            "sameStateRepeatedSignatures": 0,
+            "durationMs": 381240
+          },
+          "card": {
+            "correct": true,
+            "providerInputTokens": 78395,
+            "totalTokens": 108409,
+            "outputTokens": 30014,
+            "reasoningTokens": 25856,
+            "cacheReadTokens": 53504,
+            "providerRequests": 44,
+            "toolCalls": 34,
+            "toolErrors": 3,
+            "rawRepeatedSignatures": 5,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 333995
+          }
+        },
+        {
+          "id": "fresh-1",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 89220,
+            "totalTokens": 109677,
+            "outputTokens": 20457,
+            "reasoningTokens": 16113,
+            "cacheReadTokens": 61952,
+            "providerRequests": 55,
+            "toolCalls": 45,
+            "toolErrors": 2,
+            "rawRepeatedSignatures": 1,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 701011
+          },
+          "card": {
+            "correct": true,
+            "providerInputTokens": 67875,
+            "totalTokens": 91839,
+            "outputTokens": 23964,
+            "reasoningTokens": 20096,
+            "cacheReadTokens": 46976,
+            "providerRequests": 39,
+            "toolCalls": 30,
+            "toolErrors": 0,
+            "rawRepeatedSignatures": 0,
+            "sameStateRepeatedSignatures": 0,
+            "durationMs": 698076
+          }
+        },
+        {
+          "id": "fresh-2",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 76605,
+            "totalTokens": 96319,
+            "outputTokens": 19714,
+            "reasoningTokens": 15396,
+            "cacheReadTokens": 57600,
+            "providerRequests": 49,
+            "toolCalls": 40,
+            "toolErrors": 2,
+            "rawRepeatedSignatures": 2,
+            "sameStateRepeatedSignatures": 0,
+            "durationMs": 638343
+          },
+          "card": {
+            "correct": false,
+            "providerInputTokens": 80541,
+            "totalTokens": 104960,
+            "outputTokens": 24419,
+            "reasoningTokens": 20160,
+            "cacheReadTokens": 54528,
+            "providerRequests": 44,
+            "toolCalls": 35,
+            "toolErrors": 1,
+            "rawRepeatedSignatures": 0,
+            "sameStateRepeatedSignatures": 0,
+            "durationMs": 728417
+          }
+        }
+      ],
+      "pairedChangePercent": {
+        "providerInputTokens": { "median": -23.9, "min": -58.6, "max": 5.1 },
+        "totalTokens": { "median": -16.3, "min": -50.4, "max": 9.0 },
+        "outputTokens": { "median": 17.1, "min": 2.7, "max": 23.9 },
+        "reasoningTokens": { "median": 24.7, "min": 8.7, "max": 30.9 },
+        "cacheReadTokens": { "median": -24.2, "min": -63.9, "max": -5.3 },
+        "providerRequests": { "median": -29.1, "min": -31.3, "max": -10.2 },
+        "toolCalls": { "median": -33.3, "min": -38.2, "max": -12.5 },
+        "toolErrors": { "median": -50.0, "min": -100.0, "max": -25.0 },
+        "durationMs": { "median": -0.4, "min": -12.4, "max": 14.1 }
+      },
+      "repeatCounts": {
+        "rawRepeatedSignatures": {
+          "baseline": { "median": 1, "min": 1, "max": 2 },
+          "card": { "median": 0, "min": 0, "max": 5 }
+        },
+        "sameStateRepeatedSignatures": {
+          "baseline": { "median": 0, "min": 0, "max": 1 },
+          "card": { "median": 0, "min": 0, "max": 1 }
+        }
+      }
+    }
+  ],
+  "excludedDiagnostics": [
+    {
+      "id": "swebench-sympy-21930-interrupted",
+      "date": "2026-07-21",
+      "claimable": false,
+      "reason": "Baseline timed out during planning and the card variant exhausted its Ollama Cloud session allowance; the variants are not comparable.",
+      "baseline": {
+        "sessionsRecorded": 1,
+        "providerInputTokens": 87899,
+        "providerRequests": 7,
+        "outputTokens": 454,
+        "toolCalls": 7,
+        "toolErrors": 1,
+        "providerErrors": 0,
+        "duplicateCalls": 0,
+        "durationMs": 301270
+      },
+      "card": {
+        "sessionsRecorded": 3,
+        "providerInputTokens": 152529,
+        "providerRequests": 22,
+        "outputTokens": 422,
+        "toolCalls": 10,
+        "toolErrors": 0,
+        "providerErrors": 12,
+        "duplicateCalls": 4,
+        "durationMs": 205860
+      }
+    },
+    {
+      "id": "ten-turn-gemma-model-unavailable",
+      "date": "2026-07-22",
+      "claimable": false,
+      "reason": "Pi had no configured model matching llama-cloud/gemma4:31b; both variants exited before any provider request.",
+      "baseline": { "sessionsRecorded": 0, "providerRequests": 0 },
+      "card": { "sessionsRecorded": 0, "providerRequests": 0 }
+    },
+    {
+      "id": "ten-turn-gpt-5-nano-n3-outer-timeout",
+      "date": "2026-07-22",
+      "claimable": false,
+      "reason": "The one-hour outer command ceiling interrupted card repeat 3 after turn 1. Three baseline runs and two card runs completed, but the incomplete six-run cohort is not reported as a fresh n=3 result.",
+      "completeBaselineRuns": 3,
+      "completeCardRuns": 2,
+      "incompleteCardTurns": 1,
+      "unpairedBaseline": {
+        "correct": true,
+        "providerInputTokens": 100553,
+        "providerRequests": 60,
+        "toolCalls": 50,
+        "durationMs": 652547
+      }
+    },
+    {
+      "id": "ten-turn-gpt-5-nano-card-r3-connection-abort",
+      "date": "2026-07-22",
+      "claimable": false,
+      "reason": "A fresh recovery run stopped during turn 3 after four consecutive provider Connection error responses; later task and validation failures are consequences of the aborted protocol.",
+      "turnsRecorded": 3,
+      "providerErrors": 4,
+      "providerRequests": 22,
+      "providerInputTokens": 51565,
+      "durationMs": 306329
+    },
+    {
+      "id": "ten-turn-gpt-5-nano-card-r3-connection-abort-retry",
+      "date": "2026-07-22",
+      "claimable": false,
+      "reason": "The single permitted fresh retry stopped in turn 1 after the same four consecutive provider Connection error responses and zero reported input; no further retries were attempted.",
+      "turnsRecorded": 1,
+      "providerErrors": 4,
+      "providerRequests": 4,
+      "providerInputTokens": 0,
+      "durationMs": 47020
+    }
+  ]
+}

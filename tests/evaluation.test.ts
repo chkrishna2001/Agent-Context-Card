@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   aggregateTurns,
   analyzeSession,
@@ -6,6 +8,7 @@ import {
   parseJsonLines,
   percentChange,
   summarizeAudits,
+  summarizeRepeatedRuns,
 } from "../scripts/evaluation/metrics.mjs";
 import {
   sanitizePatch,
@@ -16,6 +19,93 @@ const lines = (values: unknown[]) =>
   values.map((value) => JSON.stringify(value)).join("\n");
 
 describe("evaluation metrics", () => {
+  test("keeps the checked-in evidence ledger internally consistent", () => {
+    const ledger = JSON.parse(
+      readFileSync(
+        path.join(
+          import.meta.dir,
+          "..",
+          "evaluation",
+          "results",
+          "evidence-ledger.json",
+        ),
+        "utf8",
+      ),
+    );
+    expect(ledger.schemaVersion).toBe(1);
+    expect(new Set(ledger.results.map((result: any) => result.id)).size).toBe(
+      ledger.results.length,
+    );
+    for (const result of ledger.results) {
+      expect(result.claimable).toBe(true);
+      for (const [metric, reported] of Object.entries(result.changePercent)) {
+        const baseline = result.baseline[metric];
+        const card = result.card[metric];
+        if (baseline === null || card === null || baseline === 0) {
+          expect(reported).toBeNull();
+          continue;
+        }
+        const calculated = ((card - baseline) / baseline) * 100;
+        expect(reported).toBe(Number(calculated.toFixed(1)));
+      }
+    }
+    const median = (values: number[]) => {
+      const sorted = values.toSorted((left, right) => left - right);
+      return sorted[Math.floor(sorted.length / 2)];
+    };
+    for (const result of ledger.repeatedResults) {
+      expect(result.claimable).toBe(true);
+      expect(result.pairs).toHaveLength(3);
+      for (const [metric, reported] of Object.entries(
+        result.pairedChangePercent,
+      )) {
+        const changes = result.pairs.map((pair: any) =>
+          Number(
+            (
+              ((pair.card[metric] - pair.baseline[metric]) /
+                pair.baseline[metric]) *
+              100
+            ).toFixed(1),
+          ),
+        );
+        expect(reported).toEqual({
+          median: median(changes),
+          min: Math.min(...changes),
+          max: Math.max(...changes),
+        });
+      }
+    }
+    expect(
+      ledger.excludedDiagnostics.every(
+        (result: any) => result.claimable === false && result.reason,
+      ),
+    ).toBe(true);
+  });
+
+  test("defines the mixed live gate as ten isolated sessions", () => {
+    const config = JSON.parse(
+      readFileSync(
+        path.join(
+          import.meta.dir,
+          "..",
+          "evaluation",
+          "configs",
+          "pi-ten-turn-mixed.json",
+        ),
+        "utf8",
+      ),
+    );
+    expect(config.turns).toHaveLength(10);
+    expect(new Set(config.turns.map((turn: any) => turn.name)).size).toBe(10);
+    expect(
+      config.turns.filter((turn: any) => turn.expect.snapshotPlanContains),
+    ).toHaveLength(2);
+    expect(config.variants.map((variant: any) => variant.name)).toEqual([
+      "baseline",
+      "card",
+    ]);
+  });
+
   test("collects provider, cache, cost, tool, retry, and compaction metrics", () => {
     const trace = analyzeTrace(
       lines([
@@ -76,8 +166,90 @@ describe("evaluation metrics", () => {
     expect(trace.toolCalls).toBe(2);
     expect(trace.toolErrors).toBe(1);
     expect(trace.duplicateToolCalls).toBe(1);
+    expect(trace.sameStateDuplicateToolCalls).toBe(1);
     expect(trace.retries).toBe(1);
     expect(trace.compactions).toBe(1);
+  });
+
+  test("separates raw repeats from calls repeated without a relevant edit", () => {
+    const trace = analyzeTrace(
+      lines([
+        {
+          type: "tool_execution_start",
+          toolCallId: "read-1",
+          toolName: "read",
+          args: { path: "counter.mjs" },
+        },
+        {
+          type: "tool_execution_start",
+          toolCallId: "edit-1",
+          toolName: "edit",
+          args: { path: "counter.mjs", edits: [] },
+        },
+        {
+          type: "tool_execution_end",
+          toolCallId: "edit-1",
+          toolName: "edit",
+          isError: false,
+        },
+        {
+          type: "tool_execution_start",
+          toolCallId: "read-2",
+          toolName: "read",
+          args: { path: "counter.mjs" },
+        },
+        {
+          type: "tool_execution_start",
+          toolCallId: "test-1",
+          toolName: "bash",
+          args: { command: "npm test" },
+        },
+        {
+          type: "tool_execution_start",
+          toolCallId: "edit-2",
+          toolName: "edit",
+          args: { path: "counter.mjs", edits: [] },
+        },
+        {
+          type: "tool_execution_end",
+          toolCallId: "edit-2",
+          toolName: "edit",
+          isError: false,
+        },
+        {
+          type: "tool_execution_start",
+          toolCallId: "test-2",
+          toolName: "bash",
+          args: { command: "npm test" },
+        },
+        {
+          type: "tool_execution_start",
+          toolCallId: "bad-1",
+          toolName: "read",
+          args: { path: "wrong/counter.mjs" },
+        },
+        {
+          type: "tool_execution_start",
+          toolCallId: "edit-3",
+          toolName: "edit",
+          args: { path: "counter.mjs", edits: [] },
+        },
+        {
+          type: "tool_execution_end",
+          toolCallId: "edit-3",
+          toolName: "edit",
+          isError: false,
+        },
+        {
+          type: "tool_execution_start",
+          toolCallId: "bad-2",
+          toolName: "read",
+          args: { path: "wrong/counter.mjs" },
+        },
+      ]),
+    );
+    expect(trace.duplicateToolCalls).toBe(5);
+    expect(trace.sameStateDuplicateToolCalls).toBe(1);
   });
 
   test("extracts projection and task-state audits without model content", () => {
@@ -135,6 +307,41 @@ describe("evaluation metrics", () => {
     expect(aggregate.providerRequests).toBe(2);
     expect(aggregate.usage.providerInput).toBe(200);
     expect(percentChange(200, 100)).toBe(-50);
+  });
+
+  test("summarizes repeated runs with paired distributions", () => {
+    const run = (variant: string, repeat: number, input: number) => ({
+      variant,
+      repeat,
+      correct: true,
+      aggregate: {
+        usage: { providerInput: input, totalTokens: input + 10, output: 10 },
+        providerRequests: 2,
+        toolCalls: 1,
+        toolErrors: 0,
+        duplicateToolCalls: 0,
+        sameStateDuplicateToolCalls: 0,
+        durationMs: input,
+      },
+    });
+    const summary = summarizeRepeatedRuns([
+      run("baseline", 1, 100),
+      run("baseline", 2, 200),
+      run("card", 1, 50),
+      run("card", 2, 100),
+    ]);
+    expect(summary.variants.baseline.metrics.providerInputTokens).toMatchObject(
+      {
+        count: 2,
+        min: 100,
+        max: 200,
+        median: 150,
+      },
+    );
+    expect(summary.pairedChanges.providerInputTokens).toMatchObject({
+      count: 2,
+      median: -50,
+    });
   });
 
   test("reports malformed JSON lines instead of dropping them silently", () => {
