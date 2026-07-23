@@ -46,6 +46,9 @@ function harness(cwd = process.cwd()) {
     tools,
     entries,
     branch: () => [...branch],
+    setFlag(name: string, value: string | boolean) {
+      flags.set(name, value);
+    },
     replaceBranch(entries: any[]) {
       branch.splice(0, branch.length, ...entries);
     },
@@ -92,6 +95,18 @@ describe("Pi adapter", () => {
       customType: CARD_MESSAGE_TYPE,
     });
     expect(extension.entries.at(-1)?.customType).toBe(AUDIT_ENTRY_TYPE);
+    expect(
+      (extension.entries.at(-1)?.data as any).continuity.planProjectionMode,
+    ).toBe("full");
+    expect(
+      (extension.entries.at(-1)?.data as any).continuity.planProjectionState,
+    ).toBe("none");
+    expect(
+      (extension.entries.at(-1)?.data as any).continuity.planPhaseFramingMode,
+    ).toBe("off");
+    expect(
+      (extension.entries.at(-1)?.data as any).continuity.planPhaseFramingState,
+    ).toBe("none");
     expect(JSON.stringify(output?.messages)).not.toContain(AUDIT_ENTRY_TYPE);
   });
 
@@ -145,6 +160,9 @@ describe("Pi adapter", () => {
         { role: "user", content: "Implement JIRA-789 now", timestamp: 3 },
       ]);
       expect(JSON.stringify(output?.messages[0])).toContain(
+        "TASK ID: JIRA-789",
+      );
+      expect(JSON.stringify(output?.messages[0])).toContain(
         "PINNED PLAN (revision 1)",
       );
 
@@ -183,14 +201,24 @@ describe("Pi adapter", () => {
       } as AgentMessage);
 
       const second = harness(cwd);
+      second.setFlag("context-card-plan-framing", "scope-note");
       await second.start();
       await second.input("Implement JIRA-123 now");
       const output = await second.project([
         { role: "user", content: "Implement JIRA-123 now", timestamp: 3 },
       ]);
       expect(JSON.stringify(output?.messages[0])).toContain(
+        "TASK ID: JIRA-123",
+      );
+      expect(JSON.stringify(output?.messages[0])).toContain(
         "PINNED PLAN (revision 1)",
       );
+      expect(JSON.stringify(output?.messages[0])).toContain(
+        "The current request is post-planning",
+      );
+      expect(
+        (second.entries.at(-1)?.data as any).continuity.planPhaseFramingState,
+      ).toBe("post-planning");
       expect(JSON.stringify(output?.messages[0])).toContain(
         "1. Inspect\\n  2. Implement",
       );

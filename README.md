@@ -72,8 +72,8 @@ Cross-session continuity is opt-in through an exact task ID such as `JIRA-123`
 or `django__django-12345`. A planning request captures the agent's exact final
 plan automatically; continuing the same task promotes it into the card. Stored
 execution facts are labeled as prior-session facts, and file-read evidence is
-never resumed. State is kept under `.agent-context-card/tasks/` and
-`/card-reset` removes the active task's stored snapshot.
+never resumed. State is kept under `.agent-context-card/tasks/`. `/card-reset`
+clears only the in-session card state and keeps the stored snapshot.
 
 ```mermaid
 flowchart LR
@@ -121,9 +121,12 @@ The ten-session mixed gate also passed on both sides with the
 `ai-inference-router/mycoder` route. The card used 29.2% fewer provider
 requests, 34.2% fewer tool calls, had zero versus four tool errors, and completed
 17.5% faster. The router did not report token usage, so no token comparison is
-claimed for this run.
+claimed for this run. Pi declared the alias `reasoning: false`, and all 107
+audited router requests omitted `reasoning_effort`; effort is not applicable to
+this result.
 
-The first `openai/gpt-5-nano` pair passed on both sides: the card used 58.6%
+The first, effort-uncontrolled `openai/gpt-5-nano` pair passed on both sides:
+the card used 58.6%
 less provider input, 50.4% fewer total tokens, 31.3% fewer requests, and 38.2%
 fewer tool calls. Trace analysis later classified four of its five raw repeated
 signatures as valid post-edit rereads or revalidation; same-state repeats were
@@ -136,6 +139,44 @@ every pair. Baseline correctness was 3/3 and card correctness was 2/3. The faile
 card run passed production tests and continuity checks but returned a plan
 instead of making the required README edit. This possible stale-plan-dominance
 failure is now an explicit experiment target, not hidden negative evidence.
+
+After the router gained reasoning-effort support, an explicitly controlled
+`low`-effort pair passed on both sides and all 20 Pi sessions recorded `low`.
+The 97 provider requests in the report matched 97 router logs, all carrying
+literal `reasoning_effort: low`. The card used 47.8% less provider input, 44.7%
+fewer total tokens, 55.2% fewer
+requests, 64.9% fewer tools, and 13.7% fewer reasoning tokens; duration fell
+18.7%. The baseline overwrote most of README and added a package lock, while the
+card preserved the README structure and added no artifact. This is a single
+controlled pair, not a reliability estimate. A subsequent fresh controlled n=3
+reversed the correctness picture: baseline passed 3/3 and the card passed 0/3.
+All 264 report requests reconciled to 264 router logs carrying literal
+`reasoning_effort: low`. The card reduced provider input by 35.7%, requests by
+42.4%, and tools by 52.0% at the paired median, but those savings are not a
+positive product result because every card run left the required increment fix
+broken. In all three, Nano received the implementation request alongside the
+exact pinned plan containing “Do not modify files,” returned another plan, and
+declined the edit. This reproduces a narrower defect: verbatim carryover of a
+planning-only constraint is unsafe for Nano on this fixture; durable plan steps
+were not shown to be the problem.
+
+A surgical follow-up retained the exact plan and added an explicit post-planning
+scope note. The note activated on all 18 intended card turns, and all 252 report
+requests matched router logs carrying `reasoning_effort: low`. Correctness
+improved from 0/3 to 1/3 but remained below the 3/3 baseline. Provider input fell
+27.5% and tools 48.8% at the paired median, while output rose 45.7%, reasoning
+rose 28.5%, and duration was 1.7% slower. Both failed traces explicitly
+re-adopted the verbatim no-edit constraint, so the note is insufficient and
+remains opt-in research only. The next design gate must structurally separate
+durable plan steps from phase-scoped process constraints.
+
+A subsequent n=3 experiment compared the default full plan with an experimental
+phase-aware projection. Full-plan passed 3/3; phase-aware passed 2/3 and used
+58.8% more provider input, 20.8% more requests, and 30.0% more tools at the
+paired median. The candidate failure occurred before plan retirement activated,
+so it does not prove retirement caused harm—but it provides no basis to change
+the default. Projection audits now distinguish configured mode from actual
+`full` or `retired` plan state.
 
 ### Official SWE-bench Verified pilots
 
@@ -156,13 +197,14 @@ runs, and article-ready raw metrics are kept in the checked-in
 | ---------------------- | ---------------------------------- |
 | /card                  | Show the current derived card      |
 | /card-new &lt;goal&gt; | Start an explicit task             |
-| /card-reset            | Clear and close the active task    |
+| /card-reset            | Clear the active card; keep snapshot |
 | /card-stats            | Show the latest projection metrics |
 
-| Flag                                  | Default | Purpose                                   |
-| ------------------------------------- | ------: | ----------------------------------------- |
-| --context-card-recent-turns &lt;n&gt; |       2 | Recent user turns eligible for projection |
-| --context-card-audit on\|off          |      on | Persist non-content projection telemetry  |
+| Flag                                             | Default | Purpose                                                 |
+| ------------------------------------------------ | ------: | ------------------------------------------------------- |
+| --context-card-recent-turns &lt;n&gt;            |       2 | Recent user turns eligible for projection               |
+| --context-card-audit on\|off                     |      on | Persist non-content projection telemetry                |
+| --context-card-plan-projection full\|phase-aware |    full | Experimental plan rendering; keep `full` for normal use |
 
 The adapter registers zero model-facing tools.
 
@@ -197,7 +239,8 @@ Requires Node.js 22.19+ and Bun for repository development.
     bun x prettier --check .
     bun build index.ts --outdir dist --target node
 
-Current validation: 30 focused tests, strict type checking, linting, formatting, and production bundling.
+Current validation: 34 focused tests, strict type checking, linting,
+formatting, and production bundling.
 
 ## Releases
 

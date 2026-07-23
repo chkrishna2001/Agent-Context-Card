@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { taskBoundaryForInput } from "../src/core/anchor";
 import { buildExecutionJournal } from "../src/core/execution";
-import { formatContextCard } from "../src/core/format";
+import {
+  formatContextCard,
+  planPhaseFramingState,
+  planProjectionState,
+} from "../src/core/format";
 import { projectContext } from "../src/core/projection";
 import type { ContextMessage, ToolCall } from "../src/core/types";
 
@@ -167,6 +171,128 @@ describe("card extraction", () => {
     expect(card).toContain(goal);
   });
 
+  test("shows taskId in the rendered card when available", () => {
+    const card = formatContextCard({
+      goal: "Implement JIRA-123",
+      taskId: "JIRA-123",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+    });
+    expect(card).toContain("TASK ID: JIRA-123");
+  });
+
+  test("phase-aware projection retires a completed plan body only outside execution phases", () => {
+    const runtimeCard = {
+      goal: "Plan JIRA-124",
+      latestRequest:
+        "Document JIRA-124 in README.md without changing production code",
+      capabilities: { documentation: ["README.md"], validation: ["bun test"] },
+      execution: { changes: [], failures: [] },
+      plan: {
+        content: "PLAN-MARKER-JIRA-124\n1. Inspect\n2. Implement",
+        revision: 1,
+        sourceTurn: 0,
+        capturedAt: "2026-07-23T00:00:00.000Z",
+      },
+      resumed: {
+        repositoryChanged: false,
+        execution: {
+          changes: [
+            {
+              action: "edit source.ts",
+              kind: "change" as const,
+              status: "success" as const,
+              count: 1,
+            },
+            {
+              action: "shell_command bun test",
+              kind: "validation" as const,
+              status: "success" as const,
+              count: 1,
+            },
+          ],
+          failures: [],
+        },
+      },
+    };
+    const full = formatContextCard(runtimeCard);
+    const phaseAware = formatContextCard(runtimeCard, {
+      planProjectionMode: "phase-aware",
+    });
+    expect(full).toContain("PLAN-MARKER-JIRA-124");
+    expect(phaseAware).toContain("PLAN STATE (revision 1)");
+    expect(phaseAware).not.toContain("PLAN-MARKER-JIRA-124");
+    expect(
+      planProjectionState(runtimeCard, {
+        planProjectionMode: "phase-aware",
+      }),
+    ).toBe("retired");
+
+    const validation = formatContextCard(
+      { ...runtimeCard, latestRequest: "Validate JIRA-124 with bun test" },
+      { planProjectionMode: "phase-aware" },
+    );
+    expect(validation).toContain("PLAN-MARKER-JIRA-124");
+    expect(
+      planProjectionState(
+        { ...runtimeCard, latestRequest: "Validate JIRA-124 with bun test" },
+        { planProjectionMode: "phase-aware" },
+      ),
+    ).toBe("full");
+  });
+
+  test("preserves a pinned plan verbatim while expiring planning-only constraints", () => {
+    const plan =
+      "PLAN-MARKER-JIRA-125\nDo not modify files.\n1. Implement the fix.";
+    const card = formatContextCard(
+      {
+        goal: "Plan JIRA-125",
+        latestRequest: "Implement JIRA-125 now",
+        capabilities: { documentation: [], validation: [] },
+        execution: { changes: [], failures: [] },
+        plan: {
+          content: plan,
+          revision: 1,
+          sourceTurn: 0,
+          capturedAt: "2026-07-23T00:00:00.000Z",
+        },
+      },
+      { planPhaseFramingMode: "scope-note" },
+    );
+    expect(card).toContain("The current request is post-planning");
+    expect(card.replace(/^  /gm, "")).toContain(plan);
+    expect(
+      planPhaseFramingState({
+        goal: "Plan JIRA-125",
+        latestRequest: "Implement JIRA-125 now",
+        capabilities: { documentation: [], validation: [] },
+        execution: { changes: [], failures: [] },
+        plan: {
+          content: plan,
+          revision: 1,
+          sourceTurn: 0,
+          capturedAt: "2026-07-23T00:00:00.000Z",
+        },
+      }),
+    ).toBe("disabled");
+    expect(
+      planPhaseFramingState(
+        {
+          goal: "Plan JIRA-125",
+          latestRequest: "Revise the plan for JIRA-125",
+          capabilities: { documentation: [], validation: [] },
+          execution: { changes: [], failures: [] },
+          plan: {
+            content: plan,
+            revision: 1,
+            sourceTurn: 0,
+            capturedAt: "2026-07-23T00:00:00.000Z",
+          },
+        },
+        { planPhaseFramingMode: "scope-note" },
+      ),
+    ).toBe("planning");
+  });
   test("keeps the exact pinned plan and labels resumed facts as historical", () => {
     const card = formatContextCard({
       goal: "Implement JIRA-123",

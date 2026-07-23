@@ -290,7 +290,13 @@ async function readTaskSnapshots(workspace) {
   return snapshots;
 }
 
-function continuityAssertions(expectation, sessions, snapshots) {
+function continuityAssertions(
+  expectation,
+  sessions,
+  snapshots,
+  expectedPlanProjectionMode,
+  expectedPlanPhaseFramingMode,
+) {
   const assertions = [];
   if (!expectation) return assertions;
   const projections = sessions.flatMap((session) => session.projections);
@@ -301,6 +307,28 @@ function continuityAssertions(expectation, sessions, snapshots) {
   );
   const add = (name, pass, detail) => assertions.push({ name, pass, detail });
 
+  if (expectedPlanProjectionMode)
+    add(
+      `plan projection mode ${expectedPlanProjectionMode}`,
+      projections.length > 0 &&
+        projections.every(
+          (audit) =>
+            audit?.continuity?.planProjectionMode ===
+            expectedPlanProjectionMode,
+        ),
+      JSON.stringify(projections.map((audit) => audit?.continuity)),
+    );
+  if (expectedPlanPhaseFramingMode)
+    add(
+      `plan phase framing mode ${expectedPlanPhaseFramingMode}`,
+      projections.length > 0 &&
+        projections.every(
+          (audit) =>
+            audit?.continuity?.planPhaseFramingMode ===
+            expectedPlanPhaseFramingMode,
+        ),
+      JSON.stringify(projections.map((audit) => audit?.continuity)),
+    );
   if (expectation.taskId)
     add(
       "task ID projected",
@@ -330,6 +358,17 @@ function continuityAssertions(expectation, sessions, snapshots) {
       projections.some(
         (audit) => audit?.continuity?.planRevision === expectation.planRevision,
       ),
+      JSON.stringify(projections.map((audit) => audit?.continuity)),
+    );
+  if (expectation.planPhaseFramingState)
+    add(
+      `plan phase framing ${expectation.planPhaseFramingState}`,
+      projections.length > 0 &&
+        projections.every(
+          (audit) =>
+            audit?.continuity?.planPhaseFramingState ===
+            expectation.planPhaseFramingState,
+        ),
       JSON.stringify(projections.map((audit) => audit?.continuity)),
     );
   if (expectation.noPlan)
@@ -418,12 +457,12 @@ function markdownReport(report) {
     lines.push(
       `### ${run.name}`,
       "",
-      "| Turn | Requests | Provider input | Output | Tools | Tool errors | Provider errors | Duration | Card chars | Projected tokens | Hot evidence | Plan rev. |",
-      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+      "| Turn | Requests | Provider input | Output | Tools | Tool errors | Provider errors | Duration | Card chars | Projected tokens | Hot evidence | Plan rev. | Plan mode | Plan state | Framing mode | Framing state |",
+      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
     );
     for (const turn of run.turns)
       lines.push(
-        `| ${turn.name} | ${turn.trace.providerRequests} | ${turn.trace.usage.providerInput} | ${turn.trace.usage.output} | ${turn.trace.toolCalls} | ${turn.trace.toolErrors} | ${turn.trace.providerErrors} | ${(turn.trace.durationMs / 1000).toFixed(2)}s | ${turn.audit.maxCardChars || "—"} | ${turn.audit.maxEstimatedProjectedTokens || "—"} | ${turn.audit.maxHotEvidence || 0} | ${turn.audit.planRevisions.join(", ") || "—"} |`,
+        `| ${turn.name} | ${turn.trace.providerRequests} | ${turn.trace.usage.providerInput} | ${turn.trace.usage.output} | ${turn.trace.toolCalls} | ${turn.trace.toolErrors} | ${turn.trace.providerErrors} | ${(turn.trace.durationMs / 1000).toFixed(2)}s | ${turn.audit.maxCardChars || "—"} | ${turn.audit.maxEstimatedProjectedTokens || "—"} | ${turn.audit.maxHotEvidence || 0} | ${turn.audit.planRevisions.join(", ") || "—"} | ${turn.audit.planProjectionModes.join(", ") || "—"} | ${turn.audit.planProjectionStates.join(", ") || "—"} | ${turn.audit.planPhaseFramingModes.join(", ") || "—"} | ${turn.audit.planPhaseFramingStates.join(", ") || "—"} |`,
       );
     lines.push("");
   }
@@ -439,7 +478,7 @@ function markdownReport(report) {
       "",
       "Medians are followed by the observed minimum-to-maximum range.",
       "",
-      "| Metric | Baseline | Context card | Paired card change |",
+      `| Metric | ${report.repeatSummary.comparison.baseline} | ${report.repeatSummary.comparison.candidate} | Paired candidate change |`,
       "| --- | ---: | ---: | ---: |",
     );
     const labels = {
@@ -457,12 +496,12 @@ function markdownReport(report) {
     };
     for (const [name, label] of Object.entries(labels))
       lines.push(
-        `| ${label} | ${formatDistribution(report.repeatSummary.variants.baseline?.metrics[name])} | ${formatDistribution(report.repeatSummary.variants.card?.metrics[name])} | ${formatDistribution(report.repeatSummary.pairedChanges[name], "%")} |`,
+        `| ${label} | ${formatDistribution(report.repeatSummary.variants[report.repeatSummary.comparison.baseline]?.metrics[name])} | ${formatDistribution(report.repeatSummary.variants[report.repeatSummary.comparison.candidate]?.metrics[name])} | ${formatDistribution(report.repeatSummary.pairedChanges[name], "%")} |`,
       );
     lines.push("");
   }
   if (report.comparison) {
-    lines.push("", "## Card change from baseline", "");
+    lines.push("", "## Candidate change from reference", "");
     for (const [name, value] of Object.entries(report.comparison))
       lines.push(
         `- ${name}: ${value === undefined ? "n/a" : `${value.toFixed(1)}%`}`,
@@ -493,12 +532,19 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.config)
     throw new Error(
-      "Usage: node scripts/evaluation/run.mjs --config <file> [--model provider/model] [--output <dir>] [--repeats n] [--variant name] [--repeat-start n]",
+      "Usage: node scripts/evaluation/run.mjs --config <file> [--model provider/model] [--thinking level] [--output <dir>] [--repeats n] [--variant name] [--repeat-start n]",
     );
   const configPath = path.resolve(process.cwd(), args.config);
   const config = JSON.parse(await readFile(configPath, "utf8"));
   const model = args.model ?? config.model;
   if (!model) throw new Error("A model is required in config or --model");
+  const thinking = args.thinking ?? config.thinking ?? "off";
+  if (
+    !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
+      thinking,
+    )
+  )
+    throw new Error(`Unsupported thinking level: ${String(thinking)}`);
   if (!Array.isArray(config.turns) || config.turns.length === 0)
     throw new Error("Config must contain at least one turn");
 
@@ -584,13 +630,16 @@ async function main() {
           "--model",
           model,
           "--thinking",
-          config.thinking ?? "off",
+          thinking,
         ];
         if (variant.sessionMode === "continue" && continuedSessionFile)
           cliArgs.push("--session", continuedSessionFile);
         if (config.offlineStartup !== false) cliArgs.push("--offline");
         if (config.noContextFiles) cliArgs.push("--no-context-files");
         if (variant.extension) cliArgs.push("--extension", extensionPath);
+        if (variant.extensionFlags)
+          for (const [flag, value] of Object.entries(variant.extensionFlags))
+            cliArgs.push(`--${flag}`, String(value));
         if (Array.isArray(config.tools))
           cliArgs.push("--tools", config.tools.join(","));
         cliArgs.push(turn.prompt);
@@ -639,7 +688,13 @@ async function main() {
           sessions,
           snapshots,
           assertions: variant.extension
-            ? continuityAssertions(turn.expect, sessions, snapshots)
+            ? continuityAssertions(
+                turn.expect,
+                sessions,
+                snapshots,
+                variant.expectPlanProjectionMode,
+                variant.expectPlanPhaseFramingMode,
+              )
             : [],
         };
         turns.push(turnResult);
@@ -719,43 +774,52 @@ async function main() {
     }
   }
 
-  const baseline = runs.find((run) => run.variant === "baseline");
-  const card = runs.find((run) => run.variant === "card");
-  const repeatSummary = repeats > 1 ? summarizeRepeatedRuns(runs) : undefined;
+  const comparisonVariants = {
+    baseline: config.comparison?.baseline ?? "baseline",
+    candidate: config.comparison?.candidate ?? "card",
+  };
+  const baseline = runs.find(
+    (run) => run.variant === comparisonVariants.baseline,
+  );
+  const candidate = runs.find(
+    (run) => run.variant === comparisonVariants.candidate,
+  );
+  const repeatSummary =
+    repeats > 1 ? summarizeRepeatedRuns(runs, comparisonVariants) : undefined;
   const comparison =
-    repeats === 1 && baseline && card
+    repeats === 1 && baseline && candidate
       ? {
           providerInput: percentChange(
             baseline.aggregate.usage.providerInput,
-            card.aggregate.usage.providerInput,
+            candidate.aggregate.usage.providerInput,
           ),
           output: percentChange(
             baseline.aggregate.usage.output,
-            card.aggregate.usage.output,
+            candidate.aggregate.usage.output,
           ),
           cost: percentChange(
             baseline.aggregate.usage.cost.total,
-            card.aggregate.usage.cost.total,
+            candidate.aggregate.usage.cost.total,
           ),
           requests: percentChange(
             baseline.aggregate.providerRequests,
-            card.aggregate.providerRequests,
+            candidate.aggregate.providerRequests,
           ),
           toolCalls: percentChange(
             baseline.aggregate.toolCalls,
-            card.aggregate.toolCalls,
+            candidate.aggregate.toolCalls,
           ),
           rawRepeatedSignatures: percentChange(
             baseline.aggregate.duplicateToolCalls,
-            card.aggregate.duplicateToolCalls,
+            candidate.aggregate.duplicateToolCalls,
           ),
           sameStateRepeatedSignatures: percentChange(
             baseline.aggregate.sameStateDuplicateToolCalls,
-            card.aggregate.sameStateDuplicateToolCalls,
+            candidate.aggregate.sameStateDuplicateToolCalls,
           ),
           duration: percentChange(
             baseline.aggregate.durationMs,
-            card.aggregate.durationMs,
+            candidate.aggregate.durationMs,
           ),
         }
       : undefined;
@@ -765,10 +829,11 @@ async function main() {
     generatedAt: new Date().toISOString(),
     configPath,
     model,
-    thinking: config.thinking ?? "off",
+    thinking,
     outputRoot,
     benchmark: config.benchmark,
     runs,
+    comparisonVariants,
     comparison,
     repeatSummary,
   };

@@ -1,10 +1,69 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-22",
+  "updatedAt": "2026-07-23",
   "sourceDocument": "docs/automated-multisession-evaluation.md",
   "metricDefinitions": {
     "duplicateCalls": "Raw exact repeated tool-call signatures; retained for compatibility with all historical reports.",
     "sameStateDuplicateCalls": "Exact repeated signatures without a successful relevant file mutation or global mutation boundary; available for traces analyzed after 2026-07-22."
+  },
+  "providerSettingAudit": {
+    "date": "2026-07-23",
+    "risk": "A configured provider-facing treatment can be silently skipped or clamped before reaching the request wire.",
+    "protocol": "Capture a provider-log boundary, run the gate, reconcile post-boundary request count with the report, and assert the literal request field on every matching request.",
+    "nanoLow": {
+      "evidenceGrade": "wire-verified",
+      "reportProviderRequests": 97,
+      "routerRequestsAudited": 97,
+      "field": "reasoning_effort",
+      "expectedValue": "low",
+      "matchingRequests": 97
+    },
+    "nanoLowN3": {
+      "evidenceGrade": "wire-verified",
+      "boundaryMaxInferenceLogId": 829,
+      "finalMaxInferenceLogId": 1093,
+      "reportProviderRequests": 264,
+      "routerRequestsAudited": 264,
+      "field": "reasoning_effort",
+      "expectedValue": "low",
+      "matchingRequests": 264,
+      "absentOrNullRequests": 0,
+      "mismatchedRequests": 0
+    },
+    "nanoLowPhaseFramingN3": {
+      "evidenceGrade": "wire-and-projection-verified",
+      "boundaryMaxInferenceLogId": 1093,
+      "finalMatchingNanoInferenceLogId": 1364,
+      "reportProviderRequests": 252,
+      "routerRequestsAudited": 252,
+      "field": "reasoning_effort",
+      "expectedValue": "low",
+      "matchingRequests": 252,
+      "absentOrNullRequests": 0,
+      "mismatchedRequests": 0,
+      "treatedCardTurns": 18,
+      "framingState": "post-planning",
+      "matchingFramingAudits": 18
+    },
+    "olderNano": {
+      "evidenceGrade": "wire-verified-absent",
+      "routerRequestsAudited": 622,
+      "field": "reasoning_effort",
+      "absentOrNullRequests": 622
+    },
+    "mycoder": {
+      "evidenceGrade": "wire-verified-not-applicable",
+      "piReasoning": false,
+      "routerRequestsAudited": 107,
+      "field": "reasoning_effort",
+      "absentOrNullRequests": 107
+    },
+    "gemma": {
+      "evidenceGrade": "session-and-usage-only",
+      "piRequestedLevel": "off",
+      "reportedReasoningTokens": 0,
+      "wireRequestAvailable": false
+    }
   },
   "results": [
     {
@@ -13,7 +72,7 @@
       "kind": "single-session-ab",
       "claimable": true,
       "model": "llama-cloud/gemma4:31b",
-      "thinking": "off",
+      "thinking": "off requested; wire unverified; reported reasoning 0",
       "correctness": { "baseline": "pass", "card": "pass" },
       "baseline": {
         "providerInputTokens": 153360,
@@ -49,7 +108,7 @@
       "kind": "cross-session-ab",
       "claimable": true,
       "model": "llama-cloud/gemma4:31b",
-      "thinking": "off",
+      "thinking": "off requested; wire unverified; reported reasoning 0",
       "correctness": { "baseline": "pass", "card": "pass" },
       "baseline": {
         "providerInputTokens": 24457,
@@ -85,7 +144,7 @@
       "kind": "swebench-verified",
       "claimable": true,
       "model": "llama-cloud/gemma4:31b",
-      "thinking": "off",
+      "thinking": "off requested; wire unverified; reported reasoning 0",
       "correctness": {
         "baseline": "unresolved",
         "card": "resolved",
@@ -128,7 +187,7 @@
       "kind": "swebench-verified",
       "claimable": true,
       "model": "llama-cloud/gemma4:31b",
-      "thinking": "off",
+      "thinking": "off requested; wire unverified; reported reasoning 0",
       "correctness": {
         "baseline": "unresolved",
         "card": "unresolved",
@@ -171,7 +230,7 @@
       "kind": "cross-session-ab",
       "claimable": true,
       "model": "ai-inference-router/mycoder",
-      "thinking": "off",
+      "thinking": "not applicable; Pi reasoning=false; wire field absent",
       "usageReported": false,
       "correctness": { "baseline": "pass", "card": "pass" },
       "baseline": {
@@ -208,7 +267,7 @@
       "kind": "cross-session-ab",
       "claimable": true,
       "model": "ai-inference-router/openai/gpt-5-nano",
-      "thinking": "off",
+      "thinking": "uncontrolled (Pi requested off)",
       "correctness": { "baseline": "pass", "card": "pass" },
       "baseline": {
         "providerInputTokens": 189460,
@@ -249,6 +308,65 @@
         "sameStateDuplicateCalls": null,
         "durationMs": -12.4
       }
+    },
+    {
+      "id": "ten-turn-mixed-gpt-5-nano-low-controlled",
+      "date": "2026-07-23",
+      "kind": "cross-session-ab",
+      "claimable": true,
+      "model": "ai-inference-router/openai/gpt-5-nano",
+      "thinking": "low",
+      "effortControl": {
+        "piLevel": "low",
+        "providerValue": "low",
+        "verifiedSessionCount": 20,
+        "wireField": "reasoning_effort",
+        "wireValue": "low",
+        "reportProviderRequests": 97,
+        "routerRequestsAudited": 97,
+        "matchingRequests": 97
+      },
+      "correctness": { "baseline": "pass", "card": "pass" },
+      "baseline": {
+        "providerInputTokens": 112923,
+        "providerRequests": 67,
+        "outputTokens": 7711,
+        "cacheReadTokens": 88192,
+        "reasoningTokens": 3983,
+        "totalTokens": 120634,
+        "toolCalls": 57,
+        "toolErrors": 4,
+        "duplicateCalls": 2,
+        "sameStateDuplicateCalls": 1,
+        "durationMs": 310430
+      },
+      "card": {
+        "providerInputTokens": 58903,
+        "providerRequests": 30,
+        "outputTokens": 7823,
+        "cacheReadTokens": 39936,
+        "reasoningTokens": 3436,
+        "totalTokens": 66726,
+        "toolCalls": 20,
+        "toolErrors": 3,
+        "duplicateCalls": 1,
+        "sameStateDuplicateCalls": 0,
+        "durationMs": 252325
+      },
+      "changePercent": {
+        "providerInputTokens": -47.8,
+        "providerRequests": -55.2,
+        "outputTokens": 1.5,
+        "cacheReadTokens": -54.7,
+        "reasoningTokens": -13.7,
+        "totalTokens": -44.7,
+        "toolCalls": -64.9,
+        "toolErrors": -25,
+        "duplicateCalls": -50,
+        "sameStateDuplicateCalls": -100,
+        "durationMs": -18.7
+      },
+      "behavior": "Both variants passed all production and continuity gates. The baseline overwrote most of README and added package-lock.json; the card preserved the README structure and added no artifact. Both implementations added input-type behavior beyond the boundary-only requirement. This is one controlled pair, not a reliability estimate."
     }
   ],
   "repeatedResults": [
@@ -258,7 +376,7 @@
       "kind": "pooled-paired-cross-session-ab",
       "claimable": true,
       "model": "ai-inference-router/openai/gpt-5-nano",
-      "thinking": "off",
+      "thinking": "uncontrolled (Pi requested off)",
       "pooling": "Three complete comparable pairs: the original pair plus the first two complete pairs from the interrupted fresh n=3 execution.",
       "correctness": {
         "baselinePassed": 3,
@@ -383,9 +501,559 @@
           "card": { "median": 0, "min": 0, "max": 1 }
         }
       }
+    },
+    {
+      "id": "gpt-5-nano-plan-phase-n3",
+      "date": "2026-07-23",
+      "kind": "paired-plan-projection-policy-ab",
+      "claimable": true,
+      "model": "ai-inference-router/openai/gpt-5-nano",
+      "thinking": "uncontrolled (Pi requested off)",
+      "variantLabels": {
+        "baseline": "full-plan",
+        "card": "phase-aware"
+      },
+      "correctness": {
+        "baselinePassed": 3,
+        "baselineFailed": 0,
+        "cardPassed": 2,
+        "cardFailed": 1,
+        "documentationPassed": { "baseline": 3, "card": 2 },
+        "cardFailure": "The implementation turn made only two reads, so the verified change-plus-validation retirement boundary never activated. The documentation turn then returned a plan with zero tool calls; increment validation and the README assertion failed."
+      },
+      "pairs": [
+        {
+          "id": "repeat-1",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 46160,
+            "totalTokens": 61881,
+            "outputTokens": 15721,
+            "reasoningTokens": 13504,
+            "cacheReadTokens": 24960,
+            "providerRequests": 24,
+            "toolCalls": 20,
+            "toolErrors": 2,
+            "rawRepeatedSignatures": 2,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 185814,
+            "documentation": {
+              "providerInputTokens": 9135,
+              "providerRequests": 5,
+              "toolCalls": 4,
+              "cardChars": 2142,
+              "passed": true
+            }
+          },
+          "card": {
+            "correct": true,
+            "providerInputTokens": 73290,
+            "totalTokens": 92289,
+            "outputTokens": 18999,
+            "reasoningTokens": 16704,
+            "cacheReadTokens": 38400,
+            "providerRequests": 29,
+            "toolCalls": 26,
+            "toolErrors": 3,
+            "rawRepeatedSignatures": 2,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 219245,
+            "documentation": {
+              "providerInputTokens": 7655,
+              "providerRequests": 4,
+              "toolCalls": 3,
+              "cardChars": 2641,
+              "passed": true
+            }
+          }
+        },
+        {
+          "id": "repeat-2",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 28515,
+            "totalTokens": 42191,
+            "outputTokens": 13676,
+            "reasoningTokens": 11840,
+            "cacheReadTokens": 19328,
+            "providerRequests": 17,
+            "toolCalls": 13,
+            "toolErrors": 1,
+            "rawRepeatedSignatures": 1,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 169645,
+            "documentation": {
+              "providerInputTokens": 8256,
+              "providerRequests": 5,
+              "toolCalls": 4,
+              "cardChars": 1864,
+              "passed": true
+            }
+          },
+          "card": {
+            "correct": false,
+            "providerInputTokens": 17418,
+            "totalTokens": 28534,
+            "outputTokens": 11116,
+            "reasoningTokens": 9728,
+            "cacheReadTokens": 10112,
+            "providerRequests": 10,
+            "toolCalls": 7,
+            "toolErrors": 1,
+            "rawRepeatedSignatures": 0,
+            "sameStateRepeatedSignatures": 0,
+            "durationMs": 94546,
+            "documentation": {
+              "providerInputTokens": 1546,
+              "providerRequests": 1,
+              "toolCalls": 0,
+              "cardChars": 1531,
+              "passed": false
+            }
+          }
+        },
+        {
+          "id": "repeat-3",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 26244,
+            "totalTokens": 41931,
+            "outputTokens": 15687,
+            "reasoningTokens": 14080,
+            "cacheReadTokens": 18944,
+            "providerRequests": 16,
+            "toolCalls": 13,
+            "toolErrors": 0,
+            "rawRepeatedSignatures": 2,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 135910,
+            "documentation": {
+              "providerInputTokens": 8348,
+              "providerRequests": 5,
+              "toolCalls": 4,
+              "cardChars": 1474,
+              "passed": true
+            }
+          },
+          "card": {
+            "correct": true,
+            "providerInputTokens": 49853,
+            "totalTokens": 64899,
+            "outputTokens": 15046,
+            "reasoningTokens": 12736,
+            "cacheReadTokens": 32256,
+            "providerRequests": 23,
+            "toolCalls": 19,
+            "toolErrors": 1,
+            "rawRepeatedSignatures": 7,
+            "sameStateRepeatedSignatures": 3,
+            "durationMs": 188102,
+            "documentation": {
+              "providerInputTokens": 5962,
+              "providerRequests": 4,
+              "toolCalls": 3,
+              "cardChars": 859,
+              "passed": true
+            }
+          }
+        }
+      ],
+      "pairedChangePercent": {
+        "providerInputTokens": { "median": 58.8, "min": -38.9, "max": 90.0 },
+        "totalTokens": { "median": 49.1, "min": -32.4, "max": 54.8 },
+        "outputTokens": { "median": -4.1, "min": -18.7, "max": 20.9 },
+        "reasoningTokens": { "median": -9.5, "min": -17.8, "max": 23.7 },
+        "cacheReadTokens": { "median": 53.8, "min": -47.7, "max": 70.3 },
+        "providerRequests": { "median": 20.8, "min": -41.2, "max": 43.8 },
+        "toolCalls": { "median": 30.0, "min": -46.2, "max": 46.2 },
+        "rawRepeatedSignatures": { "median": 0.0, "min": -100.0, "max": 250.0 },
+        "sameStateRepeatedSignatures": {
+          "median": 0.0,
+          "min": -100.0,
+          "max": 200.0
+        },
+        "durationMs": { "median": 18.0, "min": -44.3, "max": 38.4 }
+      },
+      "interpretation": "Do not promote phase-aware mode to the default. The assigned candidate was less reliable and more expensive at the paired median. The only failure occurred before retirement could activate, so the result does not establish that plan retirement itself caused the regression."
+    },
+    {
+      "id": "ten-turn-mixed-gpt-5-nano-low-controlled-n3",
+      "date": "2026-07-23",
+      "kind": "paired-cross-session-ab",
+      "claimable": true,
+      "model": "ai-inference-router/openai/gpt-5-nano",
+      "thinking": "low",
+      "wireEvidence": {
+        "boundaryMaxInferenceLogId": 829,
+        "finalMaxInferenceLogId": 1093,
+        "reportProviderRequests": 264,
+        "routerRequestsAudited": 264,
+        "field": "reasoning_effort",
+        "expectedValue": "low",
+        "matchingRequests": 264,
+        "absentOrNullRequests": 0,
+        "mismatchedRequests": 0
+      },
+      "correctness": {
+        "baselinePassed": 3,
+        "baselineFailed": 0,
+        "cardPassed": 0,
+        "cardFailed": 3,
+        "cardFailure": "All card runs completed ten sessions and passed continuity and README assertions, but npm test failed. Every card left increment broken; two also left decrement broken."
+      },
+      "mechanism": "Controlled stale-plan dominance reproduced in all three card runs. The current implementation request was projected alongside the exact pinned planning text containing 'Do not modify files'; Nano returned another plan, explicitly declined file modification, and did not apply the required increment fix.",
+      "pairs": [
+        {
+          "id": "repeat-1",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 88887,
+            "totalTokens": 95573,
+            "outputTokens": 6686,
+            "reasoningTokens": 3782,
+            "cacheReadTokens": 66048,
+            "providerRequests": 51,
+            "toolCalls": 41,
+            "toolErrors": 5,
+            "rawRepeatedSignatures": 3,
+            "sameStateRepeatedSignatures": 0,
+            "durationMs": 194035
+          },
+          "card": {
+            "correct": false,
+            "providerInputTokens": 57138,
+            "totalTokens": 66264,
+            "outputTokens": 9126,
+            "reasoningTokens": 4754,
+            "cacheReadTokens": 39680,
+            "providerRequests": 34,
+            "toolCalls": 24,
+            "toolErrors": 1,
+            "rawRepeatedSignatures": 1,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 182900
+          }
+        },
+        {
+          "id": "repeat-2",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 114758,
+            "totalTokens": 123508,
+            "outputTokens": 8750,
+            "reasoningTokens": 4966,
+            "cacheReadTokens": 94592,
+            "providerRequests": 59,
+            "toolCalls": 50,
+            "toolErrors": 11,
+            "rawRepeatedSignatures": 6,
+            "sameStateRepeatedSignatures": 3,
+            "durationMs": 161854
+          },
+          "card": {
+            "correct": false,
+            "providerInputTokens": 78590,
+            "totalTokens": 86973,
+            "outputTokens": 8383,
+            "reasoningTokens": 3583,
+            "cacheReadTokens": 47872,
+            "providerRequests": 34,
+            "toolCalls": 24,
+            "toolErrors": 10,
+            "rawRepeatedSignatures": 3,
+            "sameStateRepeatedSignatures": 3,
+            "durationMs": 120132
+          }
+        },
+        {
+          "id": "repeat-3",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 91446,
+            "totalTokens": 98611,
+            "outputTokens": 7165,
+            "reasoningTokens": 4151,
+            "cacheReadTokens": 63488,
+            "providerRequests": 57,
+            "toolCalls": 48,
+            "toolErrors": 5,
+            "rawRepeatedSignatures": 2,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 143339
+          },
+          "card": {
+            "correct": false,
+            "providerInputTokens": 50228,
+            "totalTokens": 58295,
+            "outputTokens": 8067,
+            "reasoningTokens": 4026,
+            "cacheReadTokens": 30592,
+            "providerRequests": 29,
+            "toolCalls": 19,
+            "toolErrors": 3,
+            "rawRepeatedSignatures": 2,
+            "sameStateRepeatedSignatures": 2,
+            "durationMs": 137202
+          }
+        }
+      ],
+      "pairedChangePercent": {
+        "providerInputTokens": { "median": -35.7, "min": -45.1, "max": -31.5 },
+        "totalTokens": { "median": -30.7, "min": -40.9, "max": -29.6 },
+        "outputTokens": { "median": 12.6, "min": -4.2, "max": 36.5 },
+        "reasoningTokens": { "median": -3.0, "min": -27.8, "max": 25.7 },
+        "cacheReadTokens": { "median": -49.4, "min": -51.8, "max": -39.9 },
+        "providerRequests": { "median": -42.4, "min": -49.1, "max": -33.3 },
+        "toolCalls": { "median": -52.0, "min": -60.4, "max": -41.5 },
+        "toolErrors": { "median": -40.0, "min": -80.0, "max": -9.1 },
+        "rawRepeatedSignatures": { "median": -50.0, "min": -66.7, "max": 0.0 },
+        "durationMs": { "median": -5.7, "min": -25.8, "max": -4.3 }
+      },
+      "repeatCounts": {
+        "sameStateRepeatedSignatures": {
+          "baseline": { "median": 1, "min": 0, "max": 3 },
+          "card": { "median": 2, "min": 1, "max": 3 }
+        }
+      },
+      "interpretation": "Efficiency improved in every pair, but correctness regressed in every card run. Do not use the token or tool reductions as a positive product claim without leading with the 0/3 card correctness result. Full pinned-plan projection is unsafe for GPT-5 Nano on this fixture."
+    },
+    {
+      "id": "ten-turn-mixed-gpt-5-nano-low-phase-framing-n3",
+      "date": "2026-07-23",
+      "kind": "paired-cross-session-ab",
+      "claimable": true,
+      "model": "ai-inference-router/openai/gpt-5-nano",
+      "thinking": "low",
+      "treatment": "Exact pinned plan retained with deterministic post-planning scope note; no plan content retired or rewritten.",
+      "wireEvidence": {
+        "boundaryMaxInferenceLogId": 1093,
+        "finalMatchingNanoInferenceLogId": 1364,
+        "reportProviderRequests": 252,
+        "routerRequestsAudited": 252,
+        "field": "reasoning_effort",
+        "expectedValue": "low",
+        "matchingRequests": 252,
+        "absentOrNullRequests": 0,
+        "mismatchedRequests": 0,
+        "unrelatedPostBoundaryRequestsExcluded": 46
+      },
+      "activation": {
+        "expectedTreatedCardTurns": 18,
+        "matchingPostPlanningAudits": 18,
+        "failedTreatmentAssertions": 0
+      },
+      "correctness": {
+        "baselinePassed": 3,
+        "baselineFailed": 0,
+        "cardPassed": 1,
+        "cardFailed": 2,
+        "priorUnframedCardPassed": 0,
+        "priorUnframedCardFailed": 3,
+        "cardFailure": "Repeat 2 left increment broken; repeat 3 left both increment and decrement broken. All runs completed and treatment/continuity assertions passed."
+      },
+      "mechanism": "The appended scope note improved the observed card result from 0/3 to 1/3 but did not neutralize the verbatim no-edit constraint reliably. In both failed runs Nano explicitly re-adopted the pinned plan instruction not to modify the target files. This supports separating durable plan content from phase-scoped process constraints rather than relying on a disclaimer.",
+      "fixtureAudit": "Every finalized checked-in cross-session fixture, including both SymPy pilots, contains a planning-phase no-edit instruction. Earlier passes demonstrate tolerance of the ambiguity, not absence of it.",
+      "pairs": [
+        {
+          "id": "repeat-1",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 95732,
+            "totalTokens": 101714,
+            "outputTokens": 5982,
+            "reasoningTokens": 3395,
+            "cacheReadTokens": 74752,
+            "providerRequests": 58,
+            "toolCalls": 48,
+            "toolErrors": 4,
+            "rawRepeatedSignatures": 2,
+            "sameStateRepeatedSignatures": 0,
+            "durationMs": 268572
+          },
+          "card": {
+            "correct": true,
+            "providerInputTokens": 67988,
+            "totalTokens": 75263,
+            "outputTokens": 7275,
+            "reasoningTokens": 4364,
+            "cacheReadTokens": 46592,
+            "providerRequests": 37,
+            "toolCalls": 27,
+            "toolErrors": 3,
+            "rawRepeatedSignatures": 3,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 193464
+          }
+        },
+        {
+          "id": "repeat-2",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 86594,
+            "totalTokens": 92684,
+            "outputTokens": 6090,
+            "reasoningTokens": 2949,
+            "cacheReadTokens": 64256,
+            "providerRequests": 53,
+            "toolCalls": 43,
+            "toolErrors": 5,
+            "rawRepeatedSignatures": 4,
+            "sameStateRepeatedSignatures": 2,
+            "durationMs": 182253
+          },
+          "card": {
+            "correct": false,
+            "providerInputTokens": 65514,
+            "totalTokens": 74389,
+            "outputTokens": 8875,
+            "reasoningTokens": 4454,
+            "cacheReadTokens": 42496,
+            "providerRequests": 32,
+            "toolCalls": 22,
+            "toolErrors": 5,
+            "rawRepeatedSignatures": 1,
+            "sameStateRepeatedSignatures": 0,
+            "durationMs": 188458
+          }
+        },
+        {
+          "id": "repeat-3",
+          "baseline": {
+            "correct": true,
+            "providerInputTokens": 71835,
+            "totalTokens": 78785,
+            "outputTokens": 6950,
+            "reasoningTokens": 3933,
+            "cacheReadTokens": 56576,
+            "providerRequests": 48,
+            "toolCalls": 38,
+            "toolErrors": 2,
+            "rawRepeatedSignatures": 4,
+            "sameStateRepeatedSignatures": 1,
+            "durationMs": 174609
+          },
+          "card": {
+            "correct": false,
+            "providerInputTokens": 52057,
+            "totalTokens": 62330,
+            "outputTokens": 10273,
+            "reasoningTokens": 4978,
+            "cacheReadTokens": 30336,
+            "providerRequests": 24,
+            "toolCalls": 14,
+            "toolErrors": 7,
+            "rawRepeatedSignatures": 0,
+            "sameStateRepeatedSignatures": 0,
+            "durationMs": 177496
+          }
+        }
+      ],
+      "pairedChangePercent": {
+        "providerInputTokens": {
+          "median": -27.5,
+          "min": -29.0,
+          "max": -24.3
+        },
+        "totalTokens": {
+          "median": -20.9,
+          "min": -26.0,
+          "max": -19.7
+        },
+        "outputTokens": {
+          "median": 45.7,
+          "min": 21.6,
+          "max": 47.8
+        },
+        "reasoningTokens": {
+          "median": 28.5,
+          "min": 26.6,
+          "max": 51.0
+        },
+        "cacheReadTokens": {
+          "median": -37.7,
+          "min": -46.4,
+          "max": -33.9
+        },
+        "providerRequests": {
+          "median": -39.6,
+          "min": -50.0,
+          "max": -36.2
+        },
+        "toolCalls": {
+          "median": -48.8,
+          "min": -63.2,
+          "max": -43.8
+        },
+        "toolErrors": {
+          "median": 0.0,
+          "min": -25.0,
+          "max": 250.0
+        },
+        "rawRepeatedSignatures": {
+          "median": -75.0,
+          "min": -100.0,
+          "max": 50.0
+        },
+        "durationMs": {
+          "median": 1.7,
+          "min": -28.0,
+          "max": 3.4
+        }
+      },
+      "repeatCounts": {
+        "sameStateRepeatedSignatures": {
+          "baseline": {
+            "median": 1,
+            "min": 0,
+            "max": 2
+          },
+          "card": {
+            "median": 0,
+            "min": 0,
+            "max": 1
+          }
+        }
+      },
+      "interpretation": "The surgical framing intervention was insufficient: correctness improved from 0/3 to 1/3 but remained below the 3/3 baseline. Do not promote the framing note as a fix. The next experiment should structurally separate phase-scoped constraints from durable plan steps."
     }
   ],
   "excludedDiagnostics": [
+    {
+      "id": "gpt-5-nano-plan-phase-invalid-full-suite",
+      "date": "2026-07-23",
+      "claimable": false,
+      "reason": "Both four-session variants completed and passed the targeted increment and README behavior, but the experiment was misconfigured to run npm test, which included two intentionally failing unrelated decrement tests. Its apparent efficiency comparison is excluded.",
+      "fullPlan": {
+        "turnsRecorded": 4,
+        "providerInputTokens": 51662,
+        "providerRequests": 28,
+        "toolCalls": 24
+      },
+      "phaseAware": {
+        "turnsRecorded": 4,
+        "providerInputTokens": 36557,
+        "providerRequests": 18,
+        "toolCalls": 15
+      }
+    },
+    {
+      "id": "gpt-5-nano-plan-phase-asymmetric-timeout",
+      "date": "2026-07-23",
+      "claimable": false,
+      "reason": "After correcting the target validation, the full-plan implementation session hit the five-minute ceiling and stopped after two turns while phase-aware completed all four. The asymmetric raw comparison is excluded; one separately completed full-plan recovery was used only as a preliminary n=1 diagnostic before the complete n=3 gate.",
+      "fullPlan": {
+        "turnsRecorded": 2,
+        "timedOut": true,
+        "providerInputTokens": 17555,
+        "providerRequests": 10
+      },
+      "phaseAware": {
+        "turnsRecorded": 4,
+        "correct": true,
+        "providerInputTokens": 38908,
+        "providerRequests": 19
+      }
+    },
     {
       "id": "swebench-sympy-21930-interrupted",
       "date": "2026-07-21",

@@ -33,6 +33,54 @@ describe("evaluation metrics", () => {
       ),
     );
     expect(ledger.schemaVersion).toBe(1);
+    expect(ledger.providerSettingAudit.nanoLow).toMatchObject({
+      evidenceGrade: "wire-verified",
+      reportProviderRequests: 97,
+      routerRequestsAudited: 97,
+      matchingRequests: 97,
+      field: "reasoning_effort",
+      expectedValue: "low",
+    });
+    expect(ledger.providerSettingAudit.nanoLowN3).toMatchObject({
+      evidenceGrade: "wire-verified",
+      boundaryMaxInferenceLogId: 829,
+      finalMaxInferenceLogId: 1093,
+      reportProviderRequests: 264,
+      routerRequestsAudited: 264,
+      matchingRequests: 264,
+      absentOrNullRequests: 0,
+      mismatchedRequests: 0,
+      field: "reasoning_effort",
+      expectedValue: "low",
+    });
+    expect(ledger.providerSettingAudit.nanoLowPhaseFramingN3).toMatchObject({
+      evidenceGrade: "wire-and-projection-verified",
+      boundaryMaxInferenceLogId: 1093,
+      finalMatchingNanoInferenceLogId: 1364,
+      reportProviderRequests: 252,
+      routerRequestsAudited: 252,
+      matchingRequests: 252,
+      absentOrNullRequests: 0,
+      mismatchedRequests: 0,
+      treatedCardTurns: 18,
+      matchingFramingAudits: 18,
+    });
+    expect(ledger.providerSettingAudit.olderNano).toMatchObject({
+      evidenceGrade: "wire-verified-absent",
+      routerRequestsAudited: 622,
+      absentOrNullRequests: 622,
+    });
+    expect(ledger.providerSettingAudit.mycoder).toMatchObject({
+      evidenceGrade: "wire-verified-not-applicable",
+      piReasoning: false,
+      routerRequestsAudited: 107,
+      absentOrNullRequests: 107,
+    });
+    expect(ledger.providerSettingAudit.gemma).toMatchObject({
+      evidenceGrade: "session-and-usage-only",
+      reportedReasoningTokens: 0,
+      wireRequestAvailable: false,
+    });
     expect(new Set(ledger.results.map((result: any) => result.id)).size).toBe(
       ledger.results.length,
     );
@@ -82,6 +130,38 @@ describe("evaluation metrics", () => {
     ).toBe(true);
   });
 
+  test("defines the phase-aware plan experiment as two comparable card policies", () => {
+    const config = JSON.parse(
+      readFileSync(
+        path.join(
+          import.meta.dir,
+          "..",
+          "evaluation",
+          "configs",
+          "pi-plan-phase-experiment.json",
+        ),
+        "utf8",
+      ),
+    );
+    expect(config.comparison).toEqual({
+      baseline: "full-plan",
+      candidate: "phase-aware",
+    });
+    expect(config.variants).toHaveLength(2);
+    expect(config.variants.every((variant: any) => variant.extension)).toBe(
+      true,
+    );
+    expect(
+      config.variants.map(
+        (variant: any) =>
+          variant.extensionFlags["context-card-plan-projection"],
+      ),
+    ).toEqual(["full", "phase-aware"]);
+    expect(config.turns.map((turn: any) => turn.name)).toContain(
+      "document-increment",
+    );
+  });
+
   test("defines the mixed live gate as ten isolated sessions", () => {
     const config = JSON.parse(
       readFileSync(
@@ -100,6 +180,32 @@ describe("evaluation metrics", () => {
     expect(
       config.turns.filter((turn: any) => turn.expect.snapshotPlanContains),
     ).toHaveLength(2);
+    expect(
+      config.turns.filter(
+        (turn: any) => turn.expect.planPhaseFramingState === "post-planning",
+      ),
+    ).toHaveLength(0);
+    const framing = JSON.parse(
+      readFileSync(
+        path.join(
+          import.meta.dir,
+          "..",
+          "evaluation",
+          "configs",
+          "pi-ten-turn-plan-framing.json",
+        ),
+        "utf8",
+      ),
+    );
+    expect(
+      framing.turns.filter(
+        (turn: any) => turn.expect.planPhaseFramingState === "post-planning",
+      ),
+    ).toHaveLength(6);
+    expect(framing.variants[1]).toMatchObject({
+      expectPlanPhaseFramingMode: "scope-note",
+      extensionFlags: { "context-card-plan-framing": "scope-note" },
+    });
     expect(config.variants.map((variant: any) => variant.name)).toEqual([
       "baseline",
       "card",
@@ -261,7 +367,14 @@ describe("evaluation metrics", () => {
           customType: "agent-context-card-audit",
           data: {
             hotEvidence: [],
-            continuity: { taskId: "ACCEVAL-101", planRevision: 1 },
+            continuity: {
+              taskId: "ACCEVAL-101",
+              planRevision: 1,
+              planProjectionMode: "phase-aware",
+              planProjectionState: "retired",
+              planPhaseFramingMode: "scope-note",
+              planPhaseFramingState: "post-planning",
+            },
           },
         },
         {
@@ -279,6 +392,10 @@ describe("evaluation metrics", () => {
       projectionRequests: 1,
       firstRequestHotEvidence: 0,
       planRevisions: [1],
+      planProjectionModes: ["phase-aware"],
+      planProjectionStates: ["retired"],
+      planPhaseFramingModes: ["scope-note"],
+      planPhaseFramingStates: ["post-planning"],
       taskState: { "load:success": 1 },
     });
   });
@@ -342,6 +459,15 @@ describe("evaluation metrics", () => {
       count: 2,
       median: -50,
     });
+    const policySummary = summarizeRepeatedRuns(
+      [run("full-plan", 1, 100), run("phase-aware", 1, 75)],
+      { baseline: "full-plan", candidate: "phase-aware" },
+    );
+    expect(policySummary.comparison).toEqual({
+      baseline: "full-plan",
+      candidate: "phase-aware",
+    });
+    expect(policySummary.pairedChanges.providerInputTokens.median).toBe(-25);
   });
 
   test("reports malformed JSON lines instead of dropping them silently", () => {

@@ -319,6 +319,34 @@ export function summarizeAudits(sessions) {
     firstRequestHotEvidence: Array.isArray(projections[0]?.hotEvidence)
       ? projections[0].hotEvidence.length
       : undefined,
+    planProjectionStates: [
+      ...new Set(
+        projections
+          .map((audit) => audit.continuity?.planProjectionState)
+          .filter((state) => typeof state === "string"),
+      ),
+    ],
+    planProjectionModes: [
+      ...new Set(
+        projections
+          .map((audit) => audit.continuity?.planProjectionMode)
+          .filter((mode) => typeof mode === "string"),
+      ),
+    ],
+    planPhaseFramingModes: [
+      ...new Set(
+        projections
+          .map((audit) => audit.continuity?.planPhaseFramingMode)
+          .filter((mode) => typeof mode === "string"),
+      ),
+    ],
+    planPhaseFramingStates: [
+      ...new Set(
+        projections
+          .map((audit) => audit.continuity?.planPhaseFramingState)
+          .filter((state) => typeof state === "string"),
+      ),
+    ],
     planRevisions: [
       ...new Set(
         projections
@@ -381,7 +409,10 @@ const REPEAT_METRICS = {
   durationMs: (run) => run.aggregate.durationMs,
 };
 
-export function summarizeRepeatedRuns(runs) {
+export function summarizeRepeatedRuns(
+  runs,
+  comparison = { baseline: "baseline", candidate: "card" },
+) {
   const variantNames = [...new Set(runs.map((run) => run.variant))];
   const variants = {};
   for (const variant of variantNames) {
@@ -403,24 +434,24 @@ export function summarizeRepeatedRuns(runs) {
   }
   const baseline = new Map(
     runs
-      .filter((run) => run.variant === "baseline")
+      .filter((run) => run.variant === comparison.baseline)
       .map((run) => [run.repeat, run]),
   );
-  const card = new Map(
+  const candidate = new Map(
     runs
-      .filter((run) => run.variant === "card")
+      .filter((run) => run.variant === comparison.candidate)
       .map((run) => [run.repeat, run]),
   );
   const pairedChanges = {};
   for (const [name, read] of Object.entries(REPEAT_METRICS)) {
     const changes = [];
     for (const [repeat, baselineRun] of baseline) {
-      const cardRun = card.get(repeat);
-      if (!cardRun) continue;
-      const change = percentChange(read(baselineRun), read(cardRun));
+      const candidateRun = candidate.get(repeat);
+      if (!candidateRun) continue;
+      const change = percentChange(read(baselineRun), read(candidateRun));
       if (change !== undefined) changes.push(change);
     }
     pairedChanges[name] = distribution(changes);
   }
-  return { variants, pairedChanges };
+  return { variants, comparison, pairedChanges };
 }

@@ -81,6 +81,7 @@ export interface ExecutionJournal {
 
 export interface RuntimeCard {
   goal: string;
+  taskId?: string;
   latestRequest?: string;
   capabilities: ProjectCapabilities;
   execution: ExecutionJournal;
@@ -90,6 +91,12 @@ export interface RuntimeCard {
     repositoryChanged: boolean;
   };
 }
+
+export type PlanProjectionMode = "full" | "phase-aware";
+export type PlanProjectionState = "none" | "full" | "retired";
+export type PlanPhaseFramingMode = "off" | "scope-note";
+export type PlanPhaseFramingState =
+  "none" | "disabled" | "planning" | "post-planning";
 
 export interface RepositoryProvenance {
   root: string;
@@ -109,8 +116,20 @@ export interface TaskSnapshot {
 }
 
 export interface TaskStateAudit {
-  operation: "load" | "save" | "close" | "gc";
-  status: "success" | "missing" | "corrupt" | "failed";
+  operation:
+    | "load"
+    | "save"
+    | "close"
+    | "gc"
+    | "session"
+    | "resume-check";
+  status:
+    | "success"
+    | "missing"
+    | "corrupt"
+    | "failed"
+    | "info"
+    | "skipped";
   taskId?: string;
   detail?: string;
   timestamp: string;
@@ -163,6 +182,10 @@ export interface ProjectionAudit {
   continuity?: {
     taskId?: string;
     planRevision?: number;
+    planProjectionMode?: PlanProjectionMode;
+    planProjectionState?: PlanProjectionState;
+    planPhaseFramingMode?: PlanPhaseFramingMode;
+    planPhaseFramingState?: PlanPhaseFramingState;
     planChars: number;
     resumedChanges: number;
     resumedFailures: number;

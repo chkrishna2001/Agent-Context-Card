@@ -18,7 +18,11 @@ import {
   unresolvedPriorExecution,
 } from "../core/continuity";
 import { buildExecutionJournal, isMutationToolName } from "../core/execution";
-import { formatContextCard } from "../core/format";
+import {
+  formatContextCard,
+  planPhaseFramingState,
+  planProjectionState,
+} from "../core/format";
 import { projectContext } from "../core/projection";
 import { buildRuntimeCard } from "../core/runtime";
 import {
@@ -33,6 +37,8 @@ import {
   type ExecutionJournal,
   type PinnedPlan,
   type PlanCandidate,
+  type PlanPhaseFramingMode,
+  type PlanProjectionMode,
   type PlanStateDetails,
   type ProjectionAudit,
   type RepositoryProvenance,
@@ -91,6 +97,17 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let planningTurn = false;
   let turnMutated = false;
 
+  const sessionIdOf = (ctx: ExtensionContext): string | undefined => {
+    const sessionManager = ctx.sessionManager as
+      | { getSessionId?: () => string }
+      | undefined;
+    try {
+      return sessionManager?.getSessionId?.();
+    } catch {
+      return undefined;
+    }
+  };
+
   const taskAudit = (
     operation: TaskStateAudit["operation"],
     status: TaskStateAudit["status"],
@@ -115,6 +132,28 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     type: "string",
     default: "on",
   });
+  pi.registerFlag("context-card-plan-projection", {
+    description:
+      "Pinned-plan projection: full or phase-aware (experimental; default: full)",
+    type: "string",
+    default: "full",
+  });
+  pi.registerFlag("context-card-plan-framing", {
+    description:
+      "Planning-constraint framing: off or scope-note (experimental; default: off)",
+    type: "string",
+    default: "off",
+  });
+
+  const planPhaseFramingMode = (): PlanPhaseFramingMode =>
+    pi.getFlag("context-card-plan-framing") === "scope-note"
+      ? "scope-note"
+      : "off";
+
+  const planProjectionMode = (): PlanProjectionMode =>
+    pi.getFlag("context-card-plan-projection") === "phase-aware"
+      ? "phase-aware"
+      : "full";
 
   const reconstruct = (ctx: ExtensionContext): void => {
     anchor = emptyAnchor();
@@ -208,6 +247,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       ? repositoryProvenance(ctx.cwd)
       : undefined;
     return buildRuntimeCard(ctx.cwd, anchor.goal, normalized, {
+      taskId,
       plan,
       resumed:
         hasPriorExecution && resumedProvenance && currentProvenance
@@ -238,15 +278,52 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     } catch (error) {
       taskAudit("gc", "failed", String(error));
     }
+    const branch = ctx.sessionManager.getBranch();
+    taskAudit(
+      "session",
+      "info",
+      `sessionId=${sessionIdOf(ctx) ?? "unknown"}; branchEntries=${branch.length}; branchMessages=${branchMessages(branch).length}; mayLoadCrossSession=${String(mayLoadCrossSession)}`,
+    );
   });
-  pi.on("session_tree", async (_event, ctx) => reconstruct(ctx));
-  pi.on("input", async (event) => {
+  pi.on("session_tree", async (_event, ctx) => {
+    reconstruct(ctx);
+    const branch = ctx.sessionManager.getBranch();
+    taskAudit(
+      "session",
+      "info",
+      `tree sessionId=${sessionIdOf(ctx) ?? "unknown"}; branchEntries=${branch.length}; branchMessages=${branchMessages(branch).length}; mayLoadCrossSession=${String(mayLoadCrossSession)}`,
+    );
+  });
+  pi.on("input", async (event, ctx) => {
     const requestedId = taskIdFromInput(event.text);
+    const sessionId = sessionIdOf(ctx) ?? "unknown";
     let resumed = false;
     if (mayLoadCrossSession) {
+      taskAudit(
+        "resume-check",
+        "info",
+        `sessionId=${sessionId}; reason=empty-branch; requestedId=${requestedId ?? "none"}`,
+      );
       mayLoadCrossSession = false;
-      if (requestedId && store) {
+      if (!requestedId) {
+        taskAudit(
+          "resume-check",
+          "skipped",
+          `sessionId=${sessionId}; reason=no-task-id; input=${JSON.stringify(event.text)}`,
+        );
+      } else if (!store) {
+        taskAudit(
+          "resume-check",
+          "skipped",
+          `sessionId=${sessionId}; reason=no-store; taskId=${requestedId}`,
+        );
+      } else {
         taskId = requestedId;
+        taskAudit(
+          "resume-check",
+          "info",
+          `sessionId=${sessionId}; reason=attempt-load; taskId=${requestedId}`,
+        );
         const loaded = await store.load(requestedId);
         if (loaded.status === "success") {
           const snapshot = loaded.snapshot;
@@ -261,15 +338,25 @@ export default function agentContextCard(pi: ExtensionAPI): void {
             reset: true,
           });
           persistPlanState();
-          taskAudit("load", "success");
+          taskAudit("load", "success", `sessionId=${sessionId}; taskId=${requestedId}`);
           resumed = true;
         } else if (loaded.status === "missing") {
-          taskAudit("load", "missing");
+          taskAudit("load", "missing", `sessionId=${sessionId}; taskId=${requestedId}`);
         } else {
-          taskAudit("load", "corrupt", loaded.detail);
+          taskAudit(
+            "load",
+            "corrupt",
+            `sessionId=${sessionId}; taskId=${requestedId}; detail=${loaded.detail}`,
+          );
           taskId = undefined;
         }
       }
+    } else {
+      taskAudit(
+        "resume-check",
+        "skipped",
+        `sessionId=${sessionId}; reason=non-empty-branch; requestedId=${requestedId ?? "none"}`,
+      );
     }
 
     planningTurn = isPlanningRequest(event.text);
@@ -348,7 +435,10 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     );
     const projection = projectContext(normalized, keepRecentTurns);
     const card = runtimeCard(ctx, normalized);
-    lastCard = formatContextCard(card);
+    lastCard = formatContextCard(card, {
+      planProjectionMode: planProjectionMode(),
+      planPhaseFramingMode: planPhaseFramingMode(),
+    });
     const cardMessage: AgentMessage = {
       role: "custom",
       customType: CARD_MESSAGE_TYPE,
@@ -398,6 +488,14 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       continuity: {
         taskId,
         planRevision: plan?.revision,
+        planProjectionMode: planProjectionMode(),
+        planProjectionState: planProjectionState(card, {
+          planProjectionMode: planProjectionMode(),
+        }),
+        planPhaseFramingMode: planPhaseFramingMode(),
+        planPhaseFramingState: planPhaseFramingState(card, {
+          planPhaseFramingMode: planPhaseFramingMode(),
+        }),
         planChars: plan?.content.length ?? 0,
         resumedChanges: card.resumed?.execution.changes.length ?? 0,
         resumedFailures: card.resumed?.execution.failures.length ?? 0,
@@ -419,7 +517,10 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       const normalized = normalizeMessages(
         branchMessages(ctx.sessionManager.getBranch()),
       );
-      lastCard = formatContextCard(runtimeCard(ctx, normalized));
+      lastCard = formatContextCard(runtimeCard(ctx, normalized), {
+        planProjectionMode: planProjectionMode(),
+        planPhaseFramingMode: planPhaseFramingMode(),
+      });
       ctx.ui.notify(lastCard, "info");
     },
   });
@@ -436,14 +537,12 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     description: "Clear the active context card",
     handler: async (_args, ctx) => {
       const closingTask = taskId;
-      if (closingTask && store) {
-        try {
-          const removed = await store.remove(closingTask);
-          taskAudit("close", removed ? "success" : "missing");
-        } catch (error) {
-          taskAudit("close", "failed", String(error));
-        }
-      }
+      if (closingTask)
+        taskAudit(
+          "close",
+          "info",
+          `kept snapshot for taskId=${closingTask}; sessionId=${sessionIdOf(ctx) ?? "unknown"}`,
+        );
       anchor = emptyAnchor();
       latestRequest = "";
       taskId = undefined;
@@ -456,7 +555,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         reset: true,
       });
       persistPlanState();
-      ctx.ui.notify("Context card reset.", "info");
+      ctx.ui.notify("Context card reset. Stored snapshot kept.", "info");
     },
   });
   pi.registerCommand("card-stats", {

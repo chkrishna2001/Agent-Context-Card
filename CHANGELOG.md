@@ -49,6 +49,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   returned a plan instead of editing README; provider aborts remain excluded.
 - Per-run evaluation checkpoints plus targeted `--variant` and
   `--repeat-start` recovery controls for interrupted repeated gates.
+- An opt-in phase-aware plan-projection experiment with mode/state audits and a
+  focused four-session fixture. Its complete Nano n=3 result was negative:
+  full-plan passed 3/3, phase-aware passed 2/3 and cost more at the median.
+- A reproducible `eval:pi:nano-low` gate and runner-level `--thinking` override.
+  The first controlled pair passed on both sides with 47.8% less provider input,
+  64.9% fewer tools, and 13.7% fewer reasoning tokens for the card.
+- A fresh controlled Nano-low n=3 with wire-level activation proof: all 264
+  requests carried literal `reasoning_effort: low`. Baseline passed 3/3 and the
+  card passed 0/3 because the pinned planning constraint “Do not modify files”
+  dominated the later implementation request. Median token and tool reductions
+  are retained as negative-result diagnostics, not product wins.- A controlled n=3 of the smallest scope-note intervention. The note activated
+  on all 18 intended card turns and all 252 reconciled provider requests carried
+  `reasoning_effort: low`, but correctness reached only 1/3 versus baseline 3/3.
+  The failed traces still followed the verbatim no-edit constraint. The treatment
+  remains opt-in and the result motivates structural separation of durable plan
+  steps from phase-scoped process constraints.
 
 ### Changed
 
@@ -61,6 +77,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   continuity after a settled planning turn and across tree reconstruction.
 - Benchmark submissions exclude private continuity state, and the Windows
   grader preserves LF patch transport into Linux evaluation containers.
+- Post-planning `scope-note` framing is opt-in and disabled by default. Projection
+  audits record its configured mode separately from activated framing state.
+- Plan projection remains `full` by default; experimental `phase-aware` mode
+  retires the plan body only after verified change and validation facts and now
+  reports whether treatment state is `none`, `full`, or `retired`.
+- Earlier GPT-5 Nano results are now labeled effort-uncontrolled: Pi requested
+  `off`, but the router had not yet exposed `reasoning_effort`. Controlled Nano
+  support maps only `none`, `minimal`, and `low`.
+- Provider-sensitive gates now distinguish requested configuration from activated
+  treatment. The Nano-low result is wire-verified at 97/97 requests; historical
+  Nano, `mycoder`, and direct Gemma evidence is explicitly graded.
 - Evaluation reports count provider errors separately from tool errors and stop
   a variant after a provider failure instead of recording misleading later turns.
 - Interrupted benchmark metrics are retained as explicitly non-comparable

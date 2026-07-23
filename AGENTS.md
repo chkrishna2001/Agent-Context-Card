@@ -114,17 +114,43 @@ The passive Pi adapter registers zero tools. A future change that registers a to
 
 Current size:
 
-- 1,793 TypeScript source lines;
-- approximately 40 KB bundled;
+- 1,865 TypeScript source lines;
+- approximately 42 KB bundled;
 - two Pi peer dependencies;
 - zero runtime dependencies;
-- thirty-two focused tests.
+- thirty-four focused tests.
 
 There is no copied pi-dcp source or runtime dependency. pi-dcp contributed only conceptual context-hook and tool-pairing ancestry.
 
+## Provider-setting activation audit
+
+Configured treatment and activated treatment are separate evidence states. This
+has failed twice: phase-aware mode was configured but did not reach its
+retirement boundary in the failed run, and Nano thinking was requested off before
+Pi's custom model exposed `reasoning_effort`.
+
+The 2026-07-23 router-log audit found:
+
+- controlled Nano low: exactly 97 report requests and 97 router requests, all
+  carrying literal `reasoning_effort: low`;
+- older Nano: 622 audited requests with the field absent/null;
+- `mycoder`: 107 audited requests with the field absent/null, consistent with
+  the Pi model's `reasoning: false` declaration;
+- direct Gemma gates: Pi requested off and provider usage reported zero reasoning
+  tokens, but historical outbound bodies and the old model definition are not
+  available, so the wire state is unverified.
+
+For every future provider-sensitive gate, capture the provider-log boundary,
+reconcile matching post-boundary request count with the evaluation report, and
+assert the literal request field on every request. Session configuration alone is
+not sufficient. Retain sanitized aggregate evidence, never full prompts or
+request payloads. The controlled Nano n=3 gate must satisfy this preflight.
+
 ## Latest four-turn proof
 
-Test model: llama-cloud/gemma4:31b, thinking off.
+Test model: llama-cloud/gemma4:31b. Pi requested thinking off; provider usage
+reported zero reasoning tokens, but the historical outbound wire field is
+unverified.
 
 Both sides used disposable copies, isolated session directories, Pi print mode, and continuation mode so all four prompts shared one session.
 
@@ -195,7 +221,7 @@ runs ordered sessions, grades repository commands, hashes file changes, asserts
 continuity invariants, and emits raw traces plus JSON and Markdown reports under
 the ignored `.agent-context-card/e/` directory.
 
-The first passing live run used `llama-cloud/gemma4:31b`, thinking off, on a
+The first passing live run used `llama-cloud/gemma4:31b` with Pi requesting thinking off on a
 four-session plan, implementation, validation, and unrelated-task sequence. Both
 variants passed `node --test counter.check.mjs` and changed only `counter.mjs`.
 
@@ -224,7 +250,7 @@ reliability. The protocol and full metric inventory are in
 ## First SWE-bench Verified pilot
 
 The first pinned official pilot used `sympy__sympy-18211` with
-`llama-cloud/gemma4:31b`, thinking off, split across fresh planning,
+`llama-cloud/gemma4:31b` with Pi requesting thinking off, split across fresh planning,
 implementation, and review sessions.
 
 | Metric                |   Baseline | Context card |      Change |
@@ -260,7 +286,7 @@ Benchmark integrity rules learned from this pilot:
 ## Second SWE-bench Verified pilot
 
 A completed `sympy__sympy-21930` rerun used
-`llama-cloud/gemma4:31b`, thinking off, across fresh planning,
+`llama-cloud/gemma4:31b` with Pi requesting thinking off, across fresh planning,
 implementation, and review sessions.
 
 | Metric                 |   Baseline | Context card |      Change |
@@ -322,12 +348,14 @@ assertion passed across two plan/implement/validate workflows, documentation,
 review, and unrelated-task resets. The router reported no token or cost usage,
 so those comparisons are unavailable. Because the route may choose providers
 internally and exposes only the `mycoder` alias, do not attribute this result to
-a specific underlying model family.
+a specific underlying model family. The Pi model declared `reasoning: false`, and
+all 107 audited router requests had no `reasoning_effort` value, so reasoning
+effort is not applicable to this result.
 
 ## GPT-5 Nano ten-session proof
 
 The same mixed gate completed with
-`ai-inference-router/openai/gpt-5-nano`, thinking configured off.
+`ai-inference-router/openai/gpt-5-nano`. Pi requested thinking off, but the router did not yet expose reasoning-effort control, so effort was uncontrolled.
 
 | Metric                  | Baseline | Context card | Change |
 | ----------------------- | -------: | -----------: | -----: |
@@ -349,8 +377,98 @@ smaller boundary-only production change. Output and reasoning increased. The
 raw repeated-signature counter rose from one to five, but trace analysis found
 four legitimate post-edit rereads or test reruns; same-state repeats were zero
 for baseline and one for the card, caused by a repeated malformed-path read.
-Thinking was configured off, but the provider still reported reasoning tokens.
-Preserve both the raw and state-aware metrics in future reports.
+Pi requested thinking off, but no reasoning-effort value was sent. The provider
+still reported reasoning tokens. Preserve both the raw and state-aware metrics in
+future reports.
+
+### GPT-5 Nano controlled low-effort rerun
+
+After the router added `reasoning_effort`, Pi's Nano model was configured with
+`reasoning: true`, model-level `compat.supportsReasoningEffort: true`, and an
+exact map of `off -> none`, `minimal -> minimal`, and `low -> low`; higher levels
+are unsupported. A fresh ten-session pair ran at explicit `low` effort. All 20
+session events recorded `low`, and both variants passed every production and
+continuity gate. The report counted 97 provider requests, and all 97 matching
+router logs carried literal `reasoning_effort: low`.
+
+| Metric                | Baseline | Context card | Change |
+| --------------------- | -------: | -----------: | -----: |
+| Provider input tokens |  112,923 |       58,903 | -47.8% |
+| Total tokens          |  120,634 |       66,726 | -44.7% |
+| Provider requests     |       67 |           30 | -55.2% |
+| Output tokens         |    7,711 |        7,823 |  +1.5% |
+| Reasoning tokens      |    3,983 |        3,436 | -13.7% |
+| Tool calls            |       57 |           20 | -64.9% |
+| Tool errors           |        4 |            3 | -25.0% |
+| Raw repeats           |        2 |            1 | -50.0% |
+| Same-state repeats    |        1 |            0 |  -100% |
+| Duration              | 310.43 s |     252.32 s | -18.7% |
+
+The baseline overwrote most of README and added `package-lock.json`; the card
+preserved the README structure and added no artifact. Both implementations added
+input-type behavior beyond the boundary-only requirement. This n=1 controlled
+result fixes the effort-attribution gap but is not a reliability estimate.
+
+### GPT-5 Nano controlled low-effort n=3
+
+A fresh, complete n=3 repeated the ten-session gate at explicit `low` effort.
+The six reports counted 264 provider requests. A read-only DuckDB audit of the
+router log found exactly 264 matching post-boundary requests, all carrying
+literal `reasoning_effort: low`, with zero absent or mismatched values.
+
+| Metric                |   Paired median change |   Observed range |
+| --------------------- | ---------------------: | ---------------: |
+| Correct runs          | baseline 3/3; card 0/3 |       card worse |
+| Provider input tokens |                 -35.7% | -45.1% to -31.5% |
+| Total tokens          |                 -30.7% | -40.9% to -29.6% |
+| Provider requests     |                 -42.4% | -49.1% to -33.3% |
+| Tool calls            |                 -52.0% | -60.4% to -41.5% |
+| Output tokens         |                 +12.6% |  -4.2% to +36.5% |
+| Reasoning tokens      |                  -3.0% | -27.8% to +25.7% |
+| Duration              |                  -5.7% |  -25.8% to -4.3% |
+
+Every card run completed all ten sessions and passed continuity and README
+assertions, but the final production tests failed. Nano received the explicit
+implementation request alongside the exact pinned plan containing “Do not
+modify files,” returned another plan, and explicitly declined to edit. The
+required increment behavior remained broken in all three card runs; decrement
+also remained broken in two. This is a controlled, repeatable stale-plan-
+dominance failure. Lead with the 0/3 correctness result whenever reporting the
+efficiency metrics. The precise defect is verbatim carryover of a planning-only
+constraint, not evidence that durable plan steps are generally unsafe. The
+earlier controlled n=1 must not be used as a reliability claim.
+
+### Post-planning scope-note experiment
+
+The smallest proposed intervention retained the exact pinned plan and inserted a
+deterministic note stating that planning-scoped constraints no longer applied.
+It was tested in a fresh controlled n=3 at explicit `low` effort. All 18 intended
+card turns recorded configured `scope-note` mode and activated `post-planning`
+state. The six reports counted 252 provider requests; a read-only DuckDB router
+audit found exactly 252 matching Nano requests carrying literal
+`reasoning_effort: low`.
+
+| Metric                |   Paired median change |   Observed range |
+| --------------------- | ---------------------: | ---------------: |
+| Correct runs          | baseline 3/3; card 1/3 |       card worse |
+| Provider input tokens |                 -27.5% | -29.0% to -24.3% |
+| Total tokens          |                 -20.9% | -26.0% to -19.7% |
+| Provider requests     |                 -39.6% | -50.0% to -36.2% |
+| Tool calls            |                 -48.8% | -63.2% to -43.8% |
+| Output tokens         |                 +45.7% | +21.6% to +47.8% |
+| Reasoning tokens      |                 +28.5% | +26.6% to +51.0% |
+| Duration              |                  +1.7% |  -28.0% to +3.4% |
+
+Correctness improved from the unframed card's 0/3 to 1/3, but the intervention
+was insufficient. In both failed runs Nano explicitly re-adopted the no-edit
+instruction from the verbatim plan body. Do not enable `scope-note` by default or
+report it as a fix. It is preserved only as a reproducible opt-in research mode.
+The next experiment must structurally distinguish durable plan steps from
+phase-scoped process constraints.
+
+The fixture audit found planning-phase no-edit language in every finalized
+checked-in cross-session gate, including both SymPy pilots. Earlier passes show
+that those models/runs tolerated the ambiguity; they do not establish immunity.
 
 ### GPT-5 Nano pooled repetitions
 
@@ -366,9 +484,30 @@ passed all six production tests and all continuity assertions but did not perfor
 the requested README edit. Nano returned a new plan after receiving the correct
 latest request alongside the full pinned plan and its plan marker. Treat this as
 possible stale-plan dominance, not missing context, and do not claim that card
-correctness has never been worse. Do not change plan lifecycle from this single
-observation; test any phase-aware plan rendering or retirement rule as a
-controlled variant with the README mutation as a correctness gate.
+correctness has never been worse.
+
+### Phase-aware plan projection experiment
+
+A complete focused n=3 gate compared the default `full-plan` policy with an
+opt-in `phase-aware` policy. Full-plan passed 3/3; phase-aware passed 2/3. Paired
+median candidate changes were +58.8% provider input, +49.1% total tokens, +20.8%
+requests, +30.0% tools, and +18.0% duration. Do not promote phase-aware mode to
+the default.
+
+The failed candidate made only two reads during implementation, so it recorded
+neither a verified change nor validation and never activated plan retirement.
+Its documentation request still received the full plan and returned another
+plan with zero tool calls. This is a negative intention-to-treat result, not
+evidence that activated retirement caused the failure. All three full-plan
+controls completed the README edit, so the original stale-plan behavior did not
+recur there.
+
+Two earlier attempts are excluded: one used an incorrect full-suite validation
+that included intentionally failing decrement tests, and one was asymmetric
+after a five-minute full-plan timeout. Projection audits now record both
+configured plan mode and actual plan state (`none`, `full`, or `retired`). The
+state telemetry was added after the n=3 run. Keep `full` as the normal default;
+`phase-aware` exists only for controlled research.
 
 The fresh n=3 command exceeded its one-hour outer ceiling after three baselines,
 two cards, and one turn of the third card. A complete unpaired baseline is
@@ -395,6 +534,8 @@ Do not call the package production-ready yet. The evidence does not establish:
 
 - reliability across many repositories;
 - reliability across additional repositories, runs, and model families;
+- reliable plan-to-implementation transitions for GPT-5 Nano under full-plan
+  projection;
 - correctness in very long sessions;
 - resume, fork, undo, and tree-navigation robustness under live use;
 - equivalent savings in hosts without context replacement.
@@ -413,6 +554,7 @@ Before production:
 6. verify failed evidence survives until matching success;
 7. continue measuring actual provider tokens, not just projected characters;
 8. audit every future host's real context-control capabilities.
+9. wire-verify every provider-facing treatment and reconcile request counts.
 
 ## Release automation
 

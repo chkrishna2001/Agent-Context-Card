@@ -3,7 +3,7 @@ import { buildExecutionJournal } from "./execution";
 import { buildProjectCapabilities } from "./project";
 import type { ContextMessage, RuntimeCard } from "./types";
 
-type ContinuityState = Pick<RuntimeCard, "plan" | "resumed">;
+type ContinuityState = Pick<RuntimeCard, "taskId" | "plan" | "resumed">;
 
 export function buildRuntimeCard(
   cwd: string,

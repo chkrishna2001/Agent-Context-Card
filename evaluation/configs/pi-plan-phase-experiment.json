@@ -1,0 +1,91 @@
+{
+  "name": "Pi pinned-plan phase projection experiment",
+  "model": "ai-inference-router/openai/gpt-5-nano",
+  "thinking": "off",
+  "timeoutMs": 600000,
+  "noContextFiles": true,
+  "workspace": {
+    "type": "copy",
+    "source": "evaluation/fixtures/counter-mixed"
+  },
+  "variants": [
+    {
+      "name": "full-plan",
+      "extension": true,
+      "sessionMode": "fresh",
+      "expectPlanProjectionMode": "full",
+      "extensionFlags": {
+        "context-card-plan-projection": "full"
+      }
+    },
+    {
+      "name": "phase-aware",
+      "extension": true,
+      "sessionMode": "fresh",
+      "expectPlanProjectionMode": "phase-aware",
+      "extensionFlags": {
+        "context-card-plan-projection": "phase-aware"
+      }
+    }
+  ],
+  "comparison": {
+    "baseline": "full-plan",
+    "candidate": "phase-aware"
+  },
+  "turns": [
+    {
+      "name": "plan-increment",
+      "prompt": "Plan ACCPHASE-401. Inspect counter.mjs and increment.check.mjs. The increment function must add one without exceeding maximum. Do not modify files. Return a concise numbered implementation and validation plan containing the exact marker PLAN-MARKER-ACCPHASE-401.",
+      "expect": {
+        "taskId": "ACCPHASE-401",
+        "resume": false,
+        "snapshotPlanContains": "PLAN-MARKER-ACCPHASE-401"
+      }
+    },
+    {
+      "name": "implement-increment",
+      "prompt": "Implement ACCPHASE-401 with the minimal production fix and run npm run test:increment. Follow the previously approved plan.",
+      "expect": {
+        "taskId": "ACCPHASE-401",
+        "resume": true,
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    },
+    {
+      "name": "document-increment",
+      "prompt": "Document ACCPHASE-401 in README.md. Add exactly this sentence: increment(value, maximum) increments value by one without exceeding maximum. Do not change production code.",
+      "expect": {
+        "taskId": "ACCPHASE-401",
+        "resume": true,
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    },
+    {
+      "name": "validate-increment",
+      "prompt": "Validate ACCPHASE-401 with npm run test:increment. Diagnose and fix only a related failure, then rerun if needed.",
+      "expect": {
+        "taskId": "ACCPHASE-401",
+        "resume": true,
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    }
+  ],
+  "validation": [
+    {
+      "command": "npm run test:increment",
+      "expectedExitCode": 0,
+      "timeoutMs": 30000
+    }
+  ],
+  "fileAssertions": [
+    { "path": "counter.mjs", "exists": true },
+    {
+      "path": "README.md",
+      "exists": true,
+      "contains": "increment(value, maximum) increments value by one without exceeding maximum."
+    }
+  ]
+}

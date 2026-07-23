@@ -76,6 +76,26 @@ card. It stays fully live in context for the task anchor's entire lifetime.
   retirement, or duplicate retirement. It has exactly one retirement event:
   task close.
 
+## Known gap: Phase-scoped authority inside a pinned plan
+
+The exact captured plan can mix two kinds of content:
+
+- durable task facts and implementation/validation steps that remain applicable;
+- process constraints scoped to the planning turn, such as “do not modify
+  files,” whose authority ends when the user explicitly requests implementation.
+
+The original specification did not distinguish them. A literal smaller model
+therefore followed the stale no-edit constraint in three of three unframed card
+runs. An appended deterministic post-planning disclaimer improved the observed
+result to one of three but did not reliably override the verbatim body. The note
+is retained only as an opt-in research treatment.
+
+Do not solve this by silently retiring or summarizing the whole plan. The next
+design experiment must preserve exact durable content while representing
+phase-scoped process constraints separately so their authority can end at a
+deterministic lifecycle transition. The representation and migration rules are
+not yet settled and must pass the reproducing n=3 gate before becoming default.
+
 ## New capability: Cross-Session Task Continuity
 
 **Definition.** A small, explicitly-keyed, file-backed state snapshot that
