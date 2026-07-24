@@ -139,6 +139,10 @@ The 2026-07-23 router-log audit found:
 - direct Gemma gates: Pi requested off and provider usage reported zero reasoning
   tokens, but historical outbound bodies and the old model definition are not
   available, so the wire state is unverified.
+- A later audit of the gpt-5-nano endpoint confirmed that `reasoning: off` or
+  unset triggers a `400 BadRequest` rather than degrading to uncontrolled effort.
+  This is a hard requirement; any run against this endpoint must explicitly set
+  `thinking: low` (or higher) to avoid failing closed at the provider.
 
 For every future provider-sensitive gate, capture the provider-log boundary,
 reconcile matching post-boundary request count with the evaluation report, and

@@ -39,6 +39,7 @@ export interface TaskAnchorDetails {
 
 export interface PinnedPlan {
   content: string;
+  scopeNotes?: string;
   revision: number;
   sourceTurn: number;
   capturedAt: string;
@@ -46,6 +47,7 @@ export interface PinnedPlan {
 
 export interface PlanCandidate {
   content: string;
+  scopeNotes?: string;
   sourceTurn: number;
   capturedAt: string;
 }
@@ -179,6 +181,7 @@ export interface ProjectionAudit {
   retiredTurns: number;
   retired: RetirementCounts;
   hotEvidence: EvidenceLease[];
+  retiredProcessNotes?: string;
   continuity?: {
     taskId?: string;
     planRevision?: number;

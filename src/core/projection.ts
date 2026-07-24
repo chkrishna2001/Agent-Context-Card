@@ -170,6 +170,7 @@ function fingerprint(calls: ToolCall[]): string {
 function projectTurn<TRaw>(
   messages: ContextMessage<TRaw>[],
   current: boolean,
+  activeRounds: Set<number> = new Set(),
 ): ContextMessage<TRaw>[] {
   if (messages.length <= 1) return messages;
   const user = messages[0];
@@ -181,6 +182,19 @@ function projectTurn<TRaw>(
     );
     if (finalAssistant < 0) return [user];
     const final = messages[finalAssistant];
+
+    const turnRounds = rounds(messages);
+    const activeInTurn = turnRounds.filter((r) => activeRounds.has(r.index));
+    if (activeInTurn.length > 0) {
+       // If there's active evidence in this old turn, we can't just collapse to final assistant.
+       // We need to preserve those rounds.
+       // For simplicity and correctness, if it's an old turn with active evidence,
+       // we fallback to treating it like a "current" turn for projection purposes
+       // but without the duplication removal if we want to be strict,
+       // or just let the current projection logic handle it.
+       return projectTurn(messages, true, activeRounds);
+    }
+
     if (!final?.toolCalls.length) return [user, final];
     return [user, ...messages.slice(finalAssistant)];
   }
@@ -313,14 +327,37 @@ export function projectContext<TRaw>(
     };
   }
 
+  // Calculate global evidence leases across the entire transcript
+  const globalDiscovery = consumedDiscovery(messages);
+  const globalStaleReads = consumedReads(messages);
+  const activeRounds = new Set<number>();
+  for (const round of rounds(messages)) {
+    if (!globalDiscovery.has(round.index) && !globalStaleReads.has(round.index)) {
+      activeRounds.add(round.index);
+    }
+  }
+
   const firstTurn = Math.max(0, starts.length - keepRecentTurns);
   const projected: ContextMessage<TRaw>[] = [];
   for (let turn = firstTurn; turn < starts.length; turn++) {
     const start = starts[turn];
     if (start === undefined) continue;
     const end = starts[turn + 1] ?? messages.length;
+
+    // We need to adjust activeRounds to be relative to the slice start
+    const turnActiveRounds = new Set<number>();
+    for (const roundIdx of activeRounds) {
+      if (roundIdx >= start && roundIdx < end) {
+        turnActiveRounds.add(roundIdx - start);
+      }
+    }
+
     projected.push(
-      ...projectTurn(messages.slice(start, end), turn === starts.length - 1),
+      ...projectTurn(
+        messages.slice(start, end),
+        turn === starts.length - 1,
+        turnActiveRounds,
+      ),
     );
   }
 

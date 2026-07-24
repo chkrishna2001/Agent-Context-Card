@@ -58,6 +58,7 @@ export function planPhaseFramingState(
     ? "post-planning"
     : "planning";
 }
+
 export function formatContextCard(
   card: RuntimeCard,
   options: FormatContextCardOptions = {},
@@ -73,10 +74,21 @@ export function formatContextCard(
       );
     else {
       lines.push(`PINNED PLAN (revision ${card.plan.revision}):`);
-      if (planPhaseFramingState(card, options) === "post-planning")
-        lines.push(
-          "  PHASE NOTE: This plan was written during planning. The current request is post-planning; constraints scoped only to planning (for example, not modifying files while planning) no longer apply. The plan body is preserved verbatim below.",
-        );
+      const framing = planPhaseFramingState(card, options);
+      if (framing === "post-planning") {
+        if (card.plan.scopeNotes) {
+          lines.push(`  PROCESS NOTES RETIRED AT IMPLEMENTATION START`);
+        } else {
+          // Fallback to original scope-note framing if no specific notes were captured
+          lines.push(
+            "  PHASE NOTE: This plan was written during planning. The current request is post-planning; constraints scoped only to planning (for example, not modifying files while planning) no longer apply. The plan body is preserved verbatim below.",
+          );
+        }
+      } else if (framing === "planning" && card.plan.scopeNotes) {
+        lines.push(`  PROCESS NOTES:`);
+        for (const line of card.plan.scopeNotes.split(/\r?\n/))
+          lines.push(`    ${line}`);
+      }
       for (const line of card.plan.content.split(/\r?\n/))
         lines.push(`  ${line}`);
     }

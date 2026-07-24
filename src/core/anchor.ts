@@ -7,6 +7,7 @@ const CONTINUATION =
   /^(?:now|also|next|then|finally|and|but|please|okay|ok|continue|proceed|validate|test|document|update|fix)\b/i;
 const NEW_TASK =
   /^(?:new|unrelated|separate)\s+task\b|^switch\s+to\b|\bnew unrelated task\b/i;
+const CONTENT_WORD = /[a-z0-9][a-z0-9'_-]{2,}/gi;
 const STOP_WORDS = new Set([
   "about",
   "after",
@@ -26,6 +27,10 @@ const STOP_WORDS = new Set([
   "with",
 ]);
 
+function contentWordCount(text: string): number {
+  return text.match(CONTENT_WORD)?.length ?? 0;
+}
+
 function terms(value: string): Set<string> {
   return new Set(
     value
@@ -43,6 +48,7 @@ export function taskBoundaryForInput(
   if (!text || !previous.goal) return "continue";
   if (NEW_TASK.test(text)) return "new";
   if (!previous.settled || CONTINUATION.test(text)) return "continue";
+  if (!NEW_TASK.test(text) && contentWordCount(text) <= 3) return "continue";
 
   const priorText = previous.latestRequest || previous.goal;
   const currentTaskId = taskIdFromInput(text);

@@ -25,6 +25,66 @@ export function isPlanningRequest(text: string): boolean {
   );
 }
 
+const PLAN_HEADER = "## Plan";
+const PROCESS_NOTES_HEADER = "## Process Notes";
+const PROCESS_NOTES_MAX_CHARS = 500;
+
+export function splitPlanContent(content: string): { body: string; scopeNotes: string | undefined } {
+  const planIndex = content.indexOf(PLAN_HEADER);
+  const notesIndex = content.indexOf(PROCESS_NOTES_HEADER);
+
+  if (planIndex === -1 && notesIndex === -1) {
+    return { body: content, scopeNotes: undefined };
+  }
+
+  const firstHeaderIndex = Math.min(
+    planIndex === -1 ? Infinity : planIndex,
+    notesIndex === -1 ? Infinity : notesIndex,
+  );
+
+  const preamble = content.slice(0, firstHeaderIndex).trim();
+
+  let body = "";
+  let scopeNotes: string | undefined = undefined;
+
+  if (planIndex !== -1) {
+    const planStart = planIndex + PLAN_HEADER.length;
+    const nextHeader = findNextHeader(content, planStart);
+    body = content.slice(planStart, nextHeader).trim();
+  }
+
+  if (notesIndex !== -1) {
+    const notesStart = notesIndex + PROCESS_NOTES_HEADER.length;
+    const nextHeader = findNextHeader(content, notesStart);
+    const notesContent = content.slice(notesStart, nextHeader).trim();
+    
+    if (notesContent.length > PROCESS_NOTES_MAX_CHARS) {
+      // Oversize fallback: treat as part of the durable plan body
+      body = (body ? `${body}\n\n` : "") + `${PROCESS_NOTES_HEADER}\n${notesContent}`;
+    } else {
+      scopeNotes = notesContent || undefined;
+    }
+  }
+
+  if (preamble) {
+    body = (body ? `${preamble}\n\n${body}` : preamble);
+  }
+
+  return { body, scopeNotes };
+}
+
+function findNextHeader(content: string, start: number): number {
+  const headers = [PLAN_HEADER, PROCESS_NOTES_HEADER];
+  let minIndex = content.length;
+  for (const header of headers) {
+    const index = content.indexOf(header, start);
+    if (index !== -1 && index < minIndex) {
+      minIndex = index;
+    }
+  }
+  return minIndex;
+}
+
 export function promotePlan(
   candidate: PlanCandidate,
   current?: PinnedPlan,

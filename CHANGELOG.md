@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-24
+
 ### Added
 
 - Automatic pinned-plan capture and visible plan revisions without
@@ -108,5 +110,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Experimental core API export for researchers.
 - Focused tests, product documentation, design history, and measured A/B results.
 
-[Unreleased]: https://github.com/chkrishna2001/Agent-Context-Card/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/chkrishna2001/Agent-Context-Card/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.2.0
 [0.1.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.1.0

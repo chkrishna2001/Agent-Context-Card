@@ -398,8 +398,11 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     if (previousTurnSettled && planningTurn && !turnMutated) {
       const content = messageText(event.message).trim();
       if (content) {
+        const { splitPlanContent } = await import("../core/continuity");
+        const { body, scopeNotes } = splitPlanContent(content);
         planCandidate = {
-          content,
+          content: body,
+          scopeNotes,
           sourceTurn: currentTurn,
           capturedAt: new Date().toISOString(),
         };
@@ -439,6 +442,11 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       planProjectionMode: planProjectionMode(),
       planPhaseFramingMode: planPhaseFramingMode(),
     });
+    const retiredNotes = card.plan?.scopeNotes && 
+      planPhaseFramingState(card, { planPhaseFramingMode: planPhaseFramingMode() }) === "post-planning"
+      ? card.plan.scopeNotes
+      : undefined;
+
     const cardMessage: AgentMessage = {
       role: "custom",
       customType: CARD_MESSAGE_TYPE,
@@ -485,6 +493,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       retiredTurns: projection.retiredTurns,
       retired: projection.retired,
       hotEvidence: projection.hotEvidence,
+      retiredProcessNotes: retiredNotes,
       continuity: {
         taskId,
         planRevision: plan?.revision,
