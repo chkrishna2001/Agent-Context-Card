@@ -99,8 +99,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
 
   const sessionIdOf = (ctx: ExtensionContext): string | undefined => {
     const sessionManager = ctx.sessionManager as
-      | { getSessionId?: () => string }
-      | undefined;
+      { getSessionId?: () => string } | undefined;
     try {
       return sessionManager?.getSessionId?.();
     } catch {
@@ -338,10 +337,18 @@ export default function agentContextCard(pi: ExtensionAPI): void {
             reset: true,
           });
           persistPlanState();
-          taskAudit("load", "success", `sessionId=${sessionId}; taskId=${requestedId}`);
+          taskAudit(
+            "load",
+            "success",
+            `sessionId=${sessionId}; taskId=${requestedId}`,
+          );
           resumed = true;
         } else if (loaded.status === "missing") {
-          taskAudit("load", "missing", `sessionId=${sessionId}; taskId=${requestedId}`);
+          taskAudit(
+            "load",
+            "missing",
+            `sessionId=${sessionId}; taskId=${requestedId}`,
+          );
         } else {
           taskAudit(
             "load",
@@ -442,10 +449,13 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       planProjectionMode: planProjectionMode(),
       planPhaseFramingMode: planPhaseFramingMode(),
     });
-    const retiredNotes = card.plan?.scopeNotes && 
-      planPhaseFramingState(card, { planPhaseFramingMode: planPhaseFramingMode() }) === "post-planning"
-      ? card.plan.scopeNotes
-      : undefined;
+    const retiredNotes =
+      card.plan?.scopeNotes &&
+      planPhaseFramingState(card, {
+        planPhaseFramingMode: planPhaseFramingMode(),
+      }) === "post-planning"
+        ? card.plan.scopeNotes
+        : undefined;
 
     const cardMessage: AgentMessage = {
       role: "custom",

@@ -186,13 +186,13 @@ function projectTurn<TRaw>(
     const turnRounds = rounds(messages);
     const activeInTurn = turnRounds.filter((r) => activeRounds.has(r.index));
     if (activeInTurn.length > 0) {
-       // If there's active evidence in this old turn, we can't just collapse to final assistant.
-       // We need to preserve those rounds.
-       // For simplicity and correctness, if it's an old turn with active evidence,
-       // we fallback to treating it like a "current" turn for projection purposes
-       // but without the duplication removal if we want to be strict,
-       // or just let the current projection logic handle it.
-       return projectTurn(messages, true, activeRounds);
+      // If there's active evidence in this old turn, we can't just collapse to final assistant.
+      // We need to preserve those rounds.
+      // For simplicity and correctness, if it's an old turn with active evidence,
+      // we fallback to treating it like a "current" turn for projection purposes
+      // but without the duplication removal if we want to be strict,
+      // or just let the current projection logic handle it.
+      return projectTurn(messages, true, activeRounds);
     }
 
     if (!final?.toolCalls.length) return [user, final];
@@ -332,7 +332,10 @@ export function projectContext<TRaw>(
   const globalStaleReads = consumedReads(messages);
   const activeRounds = new Set<number>();
   for (const round of rounds(messages)) {
-    if (!globalDiscovery.has(round.index) && !globalStaleReads.has(round.index)) {
+    if (
+      !globalDiscovery.has(round.index) &&
+      !globalStaleReads.has(round.index)
+    ) {
       activeRounds.add(round.index);
     }
   }

@@ -8,6 +8,7 @@ actual model-config schema before the first real run.
 
 I don't have Pi's source or its model-config schema in front of me — the shape
 above is inferred from:
+
 - the OpenRouter model catalog entry format Pi already exposes (`providers.openrouter.models[].compat`, seen for `google/gemma-4-31b-it`);
 - OpenRouter's own API docs for the `provider.order` / `allow_fallbacks` request-level
   pinning fields;
@@ -15,6 +16,7 @@ above is inferred from:
   validated for Nano in AGENTS.md.
 
 Unverified / needs a source check before first run:
+
 - **`requestExtra` is a guessed field name.** Pi may expose provider-pinning through
   a differently named key, a top-level `params` block, or not support arbitrary
   passthrough at all. Grep Pi's provider adapter source (or its docs) for how it

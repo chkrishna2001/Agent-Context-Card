@@ -26,7 +26,8 @@ describe("plan content splitting (Sizing Guard)", () => {
   });
 
   test("Case 4: Durable constraint under ## Plan survives", () => {
-    const content = "## Plan\nDo not deploy before tests pass\nStep 1\n## Process Notes\nShort note";
+    const content =
+      "## Plan\nDo not deploy before tests pass\nStep 1\n## Process Notes\nShort note";
     const { body, scopeNotes } = splitPlanContent(content);
     expect(body).toContain("Do not deploy before tests pass");
     expect(scopeNotes).toBe("Short note");
@@ -48,9 +49,15 @@ describe("plan projection visibility", () => {
         scopeNotes: "Retire me",
       },
     };
-    const card = formatContextCard(runtimeCard, { planPhaseFramingMode: "scope-note" });
-    
-    expect(planPhaseFramingState(runtimeCard, { planPhaseFramingMode: "scope-note" })).toBe("post-planning");
+    const card = formatContextCard(runtimeCard, {
+      planPhaseFramingMode: "scope-note",
+    });
+
+    expect(
+      planPhaseFramingState(runtimeCard, {
+        planPhaseFramingMode: "scope-note",
+      }),
+    ).toBe("post-planning");
     expect(card).toContain("PROCESS NOTES RETIRED AT IMPLEMENTATION START");
     expect(card).not.toContain("Retire me");
   });

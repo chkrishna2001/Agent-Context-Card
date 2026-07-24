@@ -193,12 +193,12 @@ runs, and article-ready raw metrics are kept in the checked-in
 
 ## Commands and configuration
 
-| Command                | Purpose                            |
-| ---------------------- | ---------------------------------- |
-| /card                  | Show the current derived card      |
-| /card-new &lt;goal&gt; | Start an explicit task             |
+| Command                | Purpose                              |
+| ---------------------- | ------------------------------------ |
+| /card                  | Show the current derived card        |
+| /card-new &lt;goal&gt; | Start an explicit task               |
 | /card-reset            | Clear the active card; keep snapshot |
-| /card-stats            | Show the latest projection metrics |
+| /card-stats            | Show the latest projection metrics   |
 
 | Flag                                             | Default | Purpose                                                 |
 | ------------------------------------------------ | ------: | ------------------------------------------------------- |

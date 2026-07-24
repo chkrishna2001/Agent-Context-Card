@@ -29,7 +29,10 @@ const PLAN_HEADER = "## Plan";
 const PROCESS_NOTES_HEADER = "## Process Notes";
 const PROCESS_NOTES_MAX_CHARS = 500;
 
-export function splitPlanContent(content: string): { body: string; scopeNotes: string | undefined } {
+export function splitPlanContent(content: string): {
+  body: string;
+  scopeNotes: string | undefined;
+} {
   const planIndex = content.indexOf(PLAN_HEADER);
   const notesIndex = content.indexOf(PROCESS_NOTES_HEADER);
 
@@ -57,17 +60,19 @@ export function splitPlanContent(content: string): { body: string; scopeNotes: s
     const notesStart = notesIndex + PROCESS_NOTES_HEADER.length;
     const nextHeader = findNextHeader(content, notesStart);
     const notesContent = content.slice(notesStart, nextHeader).trim();
-    
+
     if (notesContent.length > PROCESS_NOTES_MAX_CHARS) {
       // Oversize fallback: treat as part of the durable plan body
-      body = (body ? `${body}\n\n` : "") + `${PROCESS_NOTES_HEADER}\n${notesContent}`;
+      body =
+        (body ? `${body}\n\n` : "") +
+        `${PROCESS_NOTES_HEADER}\n${notesContent}`;
     } else {
       scopeNotes = notesContent || undefined;
     }
   }
 
   if (preamble) {
-    body = (body ? `${preamble}\n\n${body}` : preamble);
+    body = body ? `${preamble}\n\n${body}` : preamble;
   }
 
   return { body, scopeNotes };
