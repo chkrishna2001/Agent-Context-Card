@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "updatedAt": "2026-07-30",
   "sourceDocument": "AGENTS.md",
+  "methodologyCaveat": "Every result below whose id starts with 'ten-turn-mixed', 'gpt-5-nano-plan-phase', or 'swebench-sympy' was produced with sessionMode 'fresh' (a brand-new Pi session per turn) and relied on the since-removed typed-ticket-ID cross-session bridge to carry context between those sessions. That mechanism is gone; the configs now use sessionMode 'continue' (one genuinely continuing Pi session, no cross-session bridge needed). These numbers are historical and are not reproducible by re-running the current configs; treat them as pending re-run, not current evidence, until re-verified.",
   "metricDefinitions": {
     "duplicateCalls": "Raw exact repeated tool-call signatures; retained for compatibility with all historical reports.",
     "sameStateDuplicateCalls": "Exact repeated signatures without a successful relevant file mutation or global mutation boundary; available for traces analyzed after 2026-07-22."

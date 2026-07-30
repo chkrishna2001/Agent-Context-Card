@@ -107,6 +107,16 @@ This is a research preview, not a universal performance claim. Read the [design 
 
 ### Automated multi-turn evaluation
 
+**Methodology note:** every result in this section, through the SWE-bench
+pilots below, was measured with each turn run as its own fresh Pi session,
+bridged by a since-removed typed-ticket-ID mechanism. The configs now run
+one genuinely continuing session per variant instead — a more realistic
+simulation of real usage and no longer dependent on any cross-session
+bridge — but that means these specific numbers are historical and pending
+re-run, not current evidence. See the
+[evidence ledger](evaluation/results/evidence-ledger.json)'s
+`methodologyCaveat` field.
+
 A checked-in ten-session mixed gate adds planning, implementation, validation,
 documentation, review, and unrelated-task boundaries:
 

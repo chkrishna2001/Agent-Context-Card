@@ -23,12 +23,12 @@
     {
       "name": "baseline",
       "extension": false,
-      "sessionMode": "fresh"
+      "sessionMode": "continue"
     },
     {
       "name": "card",
       "extension": true,
-      "sessionMode": "fresh"
+      "sessionMode": "continue"
     }
   ],
   "turns": [

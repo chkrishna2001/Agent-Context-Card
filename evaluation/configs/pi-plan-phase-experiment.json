@@ -12,7 +12,7 @@
     {
       "name": "full-plan",
       "extension": true,
-      "sessionMode": "fresh",
+      "sessionMode": "continue",
       "expectPlanProjectionMode": "full",
       "extensionFlags": {
         "context-card-plan-projection": "full"
@@ -21,7 +21,7 @@
     {
       "name": "phase-aware",
       "extension": true,
-      "sessionMode": "fresh",
+      "sessionMode": "continue",
       "expectPlanProjectionMode": "phase-aware",
       "extensionFlags": {
         "context-card-plan-projection": "phase-aware"

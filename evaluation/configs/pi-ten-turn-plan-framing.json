@@ -9,11 +9,11 @@
     "source": "evaluation/fixtures/counter-mixed"
   },
   "variants": [
-    { "name": "baseline", "extension": false, "sessionMode": "fresh" },
+    { "name": "baseline", "extension": false, "sessionMode": "continue" },
     {
       "name": "card",
       "extension": true,
-      "sessionMode": "fresh",
+      "sessionMode": "continue",
       "expectPlanPhaseFramingMode": "scope-note",
       "extensionFlags": { "context-card-plan-framing": "scope-note" }
     }

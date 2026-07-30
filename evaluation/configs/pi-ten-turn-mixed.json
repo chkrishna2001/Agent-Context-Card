@@ -9,8 +9,8 @@
     "source": "evaluation/fixtures/counter-mixed"
   },
   "variants": [
-    { "name": "baseline", "extension": false, "sessionMode": "fresh" },
-    { "name": "card", "extension": true, "sessionMode": "fresh" }
+    { "name": "baseline", "extension": false, "sessionMode": "continue" },
+    { "name": "card", "extension": true, "sessionMode": "continue" }
   ],
   "turns": [
     {
