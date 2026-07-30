@@ -224,18 +224,17 @@ session resumed from if something looks wrong later.
 ## Release gates (additions to AGENTS.md's list)
 
 1. Multi-session proof test, same rigor as the existing four-turn proof:
-   plan approved in session 1; session 2 opens by referencing the task ID
-   and reports a test failure; verify the card resumes with the plan and
-   execution facts intact and zero stale evidence leases.
+   plan approved in session 1; a restart on the same session ID reports a
+   test failure; verify the card resumes with the plan and execution facts
+   intact and zero stale evidence leases.
 2. Explicit re-plan test: verify the card visibly shows the plan was
    revised, not silently replaced.
-3. No-match test: a new session with no task ID, or an unrecognized one,
-   behaves identically to today's baseline (no regression from this
-   feature being present but inactive).
+3. No-match test: a different session ID has no stored snapshot and
+   behaves identically to today's baseline.
 4. Corrupted/missing state file test: confirms fail-closed behavior per
    the development rule above.
-5. Close/expiry test: confirms explicit close removes the file, and the
-   GC safety net correctly leaves recently-touched task files alone.
+5. Expiry test: confirms the GC safety net removes card files older than
+   30 days and leaves recently-touched ones alone.
 6. Repository-drift test: facts from a different HEAD or working-tree
    fingerprint remain visibly historical and no earlier validation is
    represented as current validation.
@@ -268,7 +267,7 @@ policy experiment.
 - Which host planning signal or narrow planning-request syntax should each
   adapter recognize? The invariant is settled: capture is automatic and
   deterministic, never a user or model card-maintenance task.
-- Concurrent access: what happens if two sessions reference the same task
-  ID at the same time? Out of scope for the first implementation; at
-  minimum it must fail safely (last-write-wins is acceptable for v1, but
-  must be a stated, deliberate choice, not an accident of file-write order).
+- Concurrent access: what happens if two processes hold the same session ID
+  at the same time? Out of scope for the first implementation; at minimum it
+  must fail safely (last-write-wins is acceptable for v1, but must be a
+  stated, deliberate choice, not an accident of file-write order).

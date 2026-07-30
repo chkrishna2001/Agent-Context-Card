@@ -114,11 +114,11 @@ The passive Pi adapter registers zero tools. A future change that registers a to
 
 Current size:
 
-- 1,865 TypeScript source lines;
-- approximately 42 KB bundled;
+- approximately 2,250 TypeScript source lines;
+- approximately 52 KB bundled;
 - two Pi peer dependencies;
 - zero runtime dependencies;
-- thirty-four focused tests.
+- sixty focused tests.
 
 There is no copied pi-dcp source or runtime dependency. pi-dcp contributed only conceptual context-hook and tool-pairing ancestry.
 

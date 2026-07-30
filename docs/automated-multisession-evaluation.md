@@ -19,6 +19,17 @@ percentage from its raw counts. The checked-in configuration is
 
 ## Protocol
 
+**Stale relative to current code.** This fixture and its `resume`/`taskId`
+assertions were written against the task-ID-typed cross-session store, which
+has been replaced by session-ID-keyed persistence (see
+`docs/pinned-artifacts-and-cross-session-continuity.md`). A store keyed by
+session ID cannot bridge genuinely separate ("fresh") sessions by
+construction, so the `implement` and `validate` turns below will no longer
+resume as described. The protocol is left as-is pending a rework — this is a
+secondary continuity check, not the core context-leanness thesis this project
+is proving — but do not treat its `resume: true` expectations as current
+behavior until the fixture is updated.
+
 Each variant receives its own copied fixture and Pi session directory. The
 current sequence uses four fresh Pi sessions:
 
