@@ -76,7 +76,7 @@ card. It stays fully live in context for the task anchor's entire lifetime.
   retirement, or duplicate retirement. It has exactly one retirement event:
   task close.
 
-## Known gap: Phase-scoped authority inside a pinned plan
+## Resolved gap: Phase-scoped authority inside a pinned plan
 
 The exact captured plan can mix two kinds of content:
 
@@ -87,20 +87,45 @@ The exact captured plan can mix two kinds of content:
 The original specification did not distinguish them. A literal smaller model
 therefore followed the stale no-edit constraint in three of three unframed card
 runs. An appended deterministic post-planning disclaimer improved the observed
-result to one of three but did not reliably override the verbatim body. The note
-is retained only as an opt-in research treatment.
+result to one of three but did not reliably override the verbatim body, because
+it only stripped text the model itself filed under the `## Process Notes`
+header — a directive written inside `## Plan` instead was never caught.
 
-Do not solve this by silently retiring or summarizing the whole plan. The next
-design experiment must preserve exact durable content while representing
-phase-scoped process constraints separately so their authority can end at a
-deterministic lifecycle transition. The representation and migration rules are
-not yet settled and must pass the reproducing n=3 gate before becoming default.
+This is now solved without any silent retirement or summarization. Two
+deterministic layers, both regex/string-based, no model classification:
 
-## New capability: Cross-Session Task Continuity
+1. `extractPhaseLimitedDirectives` (`src/core/continuity.ts`) scans the durable
+   plan body itself — not only the `## Process Notes` header — for a negation
+   ("do not", "don't", "avoid", "must not", "should not") combined with a
+   mutation verb ("modify", "edit", "change", "touch", "write"). Any matching
+   line is pulled out of the durable body and merged into `scopeNotes`
+   regardless of which section the model wrote it under, then retires at
+   implementation start the same way header-based scope notes already did.
+2. `checkCardInvariants` (`src/core/invariants.ts`) re-runs the same check on
+   the fully assembled card immediately before formatting, as a defense-in-depth
+   backstop: if a directive somehow still survives in the durable body when the
+   current request is not a planning request, it strips that line before the
+   card is sent and records the violation in the existing non-model-visible
+   audit entry (`invariantViolations` on the `agent-context-card-audit` entry).
 
-**Definition.** A small, explicitly-keyed, file-backed state snapshot that
-lets a new session resume a task that a prior session was working on,
-without replaying the prior session and without treating it as memory.
+Neither layer trusts the model's own bucketing decision — that was the actual
+defect in the original disclaimer approach. Both are covered by regression
+tests (`tests/continuity-plan-scope.test.ts`, `tests/invariants.test.ts`).
+
+## Cross-Session Task Continuity
+
+**Definition.** A file-backed state snapshot, keyed by the Pi session ID, that
+lets a session recover its card after its own in-memory state and branch
+replay are unavailable — most concretely, a process restart on the same
+session — without treating stored state as open-ended memory.
+
+An earlier version of this capability keyed the store by a user-typed
+ticket ID instead of the session ID, requiring an exact match like `JIRA-123`
+in the first message of a new session before anything would resume. In
+practice this meant a session that never typed anything ticket-shaped — most
+real usage — never persisted a card to disk at all, so it was lost on any
+process restart. That mechanism has been removed; the design below replaced
+it.
 
 **What persists** (written at session end, and/or on every pinned-plan or
 execution-fact change, whichever is simpler to implement correctly):
@@ -137,27 +162,29 @@ provenance differs, the card must also say that the repository state changed;
 it must never present an earlier validation as a validation of the current
 checkout. A later matching success may still resolve a persisted failure.
 
-**Task ID resolution:**
+**Session resolution:**
 
-- Cross-session continuity is opt-in and only activates when the new
-  session's first message contains an exact, matchable task identifier
-  (e.g. a ticket key like `JIRA-123`) that corresponds to a stored task
-  file.
-- No match → behave exactly as today: fresh task anchor, no resume logic
-  invoked. This feature must be strictly additive; it must not change
-  default behavior for sessions that don't reference a prior task.
-- Matching is exact string/regex matching against stored task IDs. Accepted ID
-  syntax must be deliberately narrow, and filenames must be encoded or derived
-  from the ID so an ID cannot escape the task directory or collide through
-  filesystem case rules. No
-  fuzzy matching, no embedding similarity, no LLM judgment call on whether
-  two descriptions refer to "the same" task.
+- Resume activates unconditionally at `session_start`, whenever the
+  session's own branch replay (`reconstruct()`) leaves the task anchor
+  empty — concretely, a process restart on the same session, where Pi's own
+  branch either wasn't available yet or didn't carry the custom continuity
+  entries. It requires no message content from the user at all, typed
+  ticket ID or otherwise.
+- The lookup key is the exact Pi session ID (`sessionManager.getSessionId()`).
+  A different session ID has no matching file and resumes nothing — this is
+  a hard boundary, not a fuzzy one: two different sessions never share state
+  even if their prompts happen to reference the same ticket text.
+- The optional `taskId` field on a stored snapshot (still populated when the
+  user happens to type a ticket-ID-shaped string) is carried through purely
+  as a display label (`TASK ID: ...` in the rendered card) and plays no role
+  in resolving which file to load.
 
 **Storage:**
 
-- One file per task, e.g. `.agent-context-card/tasks/<taskId>.json`. Plain
-  file, no database, no new runtime dependency — consistent with the
-  project's zero-runtime-dependency rule.
+- One file per Pi session, `%USERPROFILE%/.agent-context-card/cards/card-<sessionId>.json`
+  (`src/pi/session-card-store.ts`, `SessionCardStore`). Global, not
+  project-local, matching where Pi stores its own session files. Plain file,
+  no database, no new runtime dependency.
 - Store structured state (JSON), not pre-rendered card text, so the
   existing card renderer stays the single source of truth for what the
   model actually sees. Rendering must always go through the same formatter
@@ -170,11 +197,11 @@ checkout. A later matching success may still resolve a persisted failure.
 
 **Close / expiry:**
 
-- Primary mechanism: an explicit close (e.g. `/task close JIRA-123` or
-  equivalent), triggered by the user, deleting the stored file.
-- Secondary safety net: a age-based garbage-collection pass (e.g. delete
-  task files untouched for N days) to catch abandoned tickets. This is a
-  safety net, not the primary mechanism — closing must not depend on
+- `/card-reset` clears only the in-session card state; it deliberately keeps
+  the stored snapshot on disk (there is no explicit delete command).
+- The only expiry mechanism is an age-based garbage-collection pass, run at
+  every `session_start`, that deletes card files untouched for more than 30
+  days. This is intentionally the sole mechanism — closing must not depend on
   inferring "this seems done" from conversation content.
 
 **Audit isolation still applies:** every save/load of cross-session state
