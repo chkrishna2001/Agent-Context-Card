@@ -29,6 +29,40 @@ const PLAN_HEADER = "## Plan";
 const PROCESS_NOTES_HEADER = "## Process Notes";
 const PROCESS_NOTES_MAX_CHARS = 500;
 
+export function extractPhaseLimitedDirectives(text: string): {
+  body: string;
+  extracted: string[];
+} {
+  const negationPatterns = [
+    /do not/i,
+    /don't/i,
+    /avoid/i,
+    /must not/i,
+    /should not/i,
+  ];
+  const mutationVerbs = [/modify/i, /edit/i, /change/i, /touch/i, /write/i];
+
+  const lines = text.split("\n");
+  const extracted: string[] = [];
+  const remaining: string[] = [];
+
+  for (const line of lines) {
+    const hasNegation = negationPatterns.some((p) => p.test(line));
+    const hasMutation = mutationVerbs.some((p) => p.test(line));
+
+    if (hasNegation && hasMutation) {
+      extracted.push(line);
+    } else {
+      remaining.push(line);
+    }
+  }
+
+  return {
+    body: remaining.filter((l) => l.trim() !== "").join("\n\n"),
+    extracted,
+  };
+}
+
 export function splitPlanContent(content: string): {
   body: string;
   scopeNotes: string | undefined;
@@ -49,6 +83,7 @@ export function splitPlanContent(content: string): {
 
   let body = "";
   let scopeNotes: string | undefined = undefined;
+  let notesOversized = false;
 
   if (planIndex !== -1) {
     const planStart = planIndex + PLAN_HEADER.length;
@@ -62,10 +97,13 @@ export function splitPlanContent(content: string): {
     const notesContent = content.slice(notesStart, nextHeader).trim();
 
     if (notesContent.length > PROCESS_NOTES_MAX_CHARS) {
-      // Oversize fallback: treat as part of the durable plan body
+      // Oversize fallback: treat as part of the durable plan body. A combined
+      // scopeNotes can never fit under the limit once Process Notes alone
+      // already exceeds it, so directive extraction below is skipped too.
       body =
         (body ? `${body}\n\n` : "") +
         `${PROCESS_NOTES_HEADER}\n${notesContent}`;
+      notesOversized = true;
     } else {
       scopeNotes = notesContent || undefined;
     }
@@ -73,6 +111,23 @@ export function splitPlanContent(content: string): {
 
   if (preamble) {
     body = body ? `${preamble}\n\n${body}` : preamble;
+  }
+
+  if (!notesOversized) {
+    const { body: filteredBody, extracted } =
+      extractPhaseLimitedDirectives(body);
+    if (extracted.length > 0) {
+      const combinedNotes = scopeNotes
+        ? `${scopeNotes}\n${extracted.join("\n")}`
+        : extracted.join("\n");
+
+      if (combinedNotes.length <= PROCESS_NOTES_MAX_CHARS) {
+        body = filteredBody;
+        scopeNotes = combinedNotes;
+      }
+      // Otherwise combinedNotes would exceed the limit: leave body and
+      // scopeNotes untouched so directives stay in their original form.
+    }
   }
 
   return { body, scopeNotes };

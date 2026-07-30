@@ -170,6 +170,7 @@ export interface ProjectionAudit {
   retired: RetirementCounts;
   hotEvidence: EvidenceLease[];
   retiredProcessNotes?: string;
+  invariantViolations?: import("./invariants").InvariantViolation[];
   continuity?: {
     taskId?: string;
     planRevision?: number;

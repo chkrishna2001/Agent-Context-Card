@@ -110,6 +110,34 @@ describe("Pi adapter", () => {
     expect(JSON.stringify(output?.messages)).not.toContain(AUDIT_ENTRY_TYPE);
   });
 
+  test("invariant linter strips stale plan directives and records violations", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Create a plan for JIRA-123");
+    await extension.turnEnd({
+      role: "assistant",
+      content: [
+        { type: "text", text: "1. Edit source.ts\nDo not modify files." },
+      ],
+      stopReason: "stop",
+      timestamp: 2,
+    } as AgentMessage);
+    await extension.input("Implement JIRA-123 now");
+    const output = await extension.project([
+      { role: "user", content: "Implement JIRA-123 now", timestamp: 3 },
+    ]);
+    expect(JSON.stringify(output?.messages[0])).not.toContain(
+      "Do not modify files.",
+    );
+    expect(JSON.stringify(output?.messages[0])).toContain("1. Edit source.ts");
+    const lastAudit = extension.entries.at(-1)?.data;
+    expect(lastAudit).toBeDefined();
+    expect((lastAudit as any).invariantViolations).toContainEqual({
+      rule: "stale-plan-directive",
+      detail: "Do not modify files.",
+    });
+  });
+
   test("an unrelated task excludes earlier task messages", () => {
     const messages = [
       { role: "user", content: "first task", timestamp: 1 },

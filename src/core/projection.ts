@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { terms } from "./lexical";
 import type {
   ContextMessage,
   EvidenceLease,
@@ -78,7 +79,7 @@ function resultMap<TRaw>(
 
 function rounds<TRaw>(messages: ContextMessage<TRaw>[]): Round<TRaw>[] {
   return messages.flatMap((message, index) =>
-    message.toolCalls.length
+    message.toolCalls?.length
       ? [{ index, message, calls: message.toolCalls }]
       : [],
   );
@@ -92,8 +93,30 @@ function successful<TRaw>(
   return Boolean(result?.toolResult && !result.toolResult.isError);
 }
 
+function hasReferenceOverlap<TRaw>(
+  round: Round<TRaw>,
+  userText: string,
+): boolean {
+  const userTerms = terms(userText);
+  if (userTerms.size === 0) return false;
+
+  for (const call of round.calls) {
+    const path = filePath(call.arguments);
+    if (path && userText.toLowerCase().includes(path.toLowerCase()))
+      return true;
+
+    const callText = [command(call), JSON.stringify(call.arguments)].join(" ");
+    const callTerms = terms(callText);
+    for (const term of callTerms) {
+      if (userTerms.has(term)) return true;
+    }
+  }
+  return false;
+}
+
 function consumedDiscovery<TRaw>(
   messages: ContextMessage<TRaw>[],
+  currentTurnText: string | null = null,
 ): Set<number> {
   const results = resultMap(messages);
   const allRounds = rounds(messages);
@@ -122,13 +145,20 @@ function consumedDiscovery<TRaw>(
       (round.calls.every(isListing) && hasLater(round.index, isRead)) ||
       ((!output || output === "(no output)") &&
         allRounds.some((candidate) => candidate.index > round.index))
-    )
+    ) {
+      if (currentTurnText && hasReferenceOverlap(round, currentTurnText)) {
+        continue;
+      }
       consumed.add(round.index);
+    }
   }
   return consumed;
 }
 
-function consumedReads<TRaw>(messages: ContextMessage<TRaw>[]): Set<number> {
+function consumedReads<TRaw>(
+  messages: ContextMessage<TRaw>[],
+  currentTurnText: string | null = null,
+): Set<number> {
   const results = resultMap(messages);
   const allRounds = rounds(messages);
   const consumed = new Set<number>();
@@ -156,7 +186,12 @@ function consumedReads<TRaw>(messages: ContextMessage<TRaw>[]): Set<number> {
         candidate.index > mutation.index &&
         candidate.calls.some((call) => successful(call, results)),
     );
-    if (graceObserved) consumed.add(round.index);
+    if (graceObserved) {
+      if (currentTurnText && hasReferenceOverlap(round, currentTurnText)) {
+        continue;
+      }
+      consumed.add(round.index);
+    }
   }
   return consumed;
 }
@@ -186,12 +221,8 @@ function projectTurn<TRaw>(
     const turnRounds = rounds(messages);
     const activeInTurn = turnRounds.filter((r) => activeRounds.has(r.index));
     if (activeInTurn.length > 0) {
-      // If there's active evidence in this old turn, we can't just collapse to final assistant.
-      // We need to preserve those rounds.
-      // For simplicity and correctness, if it's an old turn with active evidence,
-      // we fallback to treating it like a "current" turn for projection purposes
-      // but without the duplication removal if we want to be strict,
-      // or just let the current projection logic handle it.
+      // Old turn with active evidence: keep it as if it were current
+      // but using the globally calculated activeRounds.
       return projectTurn(messages, true, activeRounds);
     }
 
@@ -199,8 +230,11 @@ function projectTurn<TRaw>(
     return [user, ...messages.slice(finalAssistant)];
   }
 
-  const discovery = consumedDiscovery(messages);
-  const staleReads = consumedReads(messages);
+  const currentTurnText =
+    messages.filter((m) => m.role === "user").slice(-1)[0]?.text ?? null;
+
+  const discovery = consumedDiscovery(messages, currentTurnText);
+  const staleReads = consumedReads(messages, currentTurnText);
   const candidates = rounds(messages).filter(
     (round) => !discovery.has(round.index) && !staleReads.has(round.index),
   );
@@ -238,11 +272,13 @@ function projectionDetails<TRaw>(
   projected: ContextMessage<TRaw>[],
 ): { retired: RetirementCounts; hotEvidence: EvidenceLease[] } {
   const keptIds = new Set(
-    projected.flatMap((message) => message.toolCalls.map((call) => call.id)),
+    projected.flatMap(
+      (message) => message.toolCalls?.map((call) => call.id) ?? [],
+    ),
   );
   const keptFingerprints = new Set(
     projected.flatMap((message) =>
-      message.toolCalls.length ? [fingerprint(message.toolCalls)] : [],
+      message.toolCalls?.length ? [fingerprint(message.toolCalls)] : [],
     ),
   );
   const lastUser = original.findLastIndex((message) => message.role === "user");
@@ -255,7 +291,7 @@ function projectionDetails<TRaw>(
 
   for (const [index, message] of original.entries()) {
     const calls = message.toolCalls;
-    if (!calls.length || calls.some((call) => keptIds.has(call.id))) continue;
+    if (!calls?.length || calls.some((call) => keptIds.has(call.id))) continue;
     if (index < lastUser) {
       retired.completedTurn++;
     } else if (calls.every(isDiscovery)) {
@@ -270,8 +306,9 @@ function projectionDetails<TRaw>(
   }
 
   const results = resultMap(projected);
-  const calls = projected.flatMap((message, index) =>
-    message.toolCalls.map((call) => ({ call, index })),
+  const calls = projected.flatMap(
+    (message, index) =>
+      message.toolCalls?.map((call) => ({ call, index })) ?? [],
   );
   const latestReads = new Map<string, EvidenceLease>();
   for (const { call, index } of calls) {
@@ -307,16 +344,16 @@ export function projectContext<TRaw>(
     .map((message, index) => (message.role === "user" ? index : -1))
     .filter((index) => index >= 0);
   if (!starts.length) {
-    const chars = messages.reduce(
-      (sum, message) => sum + message.text.length,
+    const originalChars = messages.reduce(
+      (sum, message) => sum + (message.text?.length ?? 0),
       0,
     );
     return {
       messages: messages.map((message) => message.raw),
       retiredMessages: 0,
       retiredTurns: 0,
-      originalChars: chars,
-      projectedChars: chars,
+      originalChars,
+      projectedChars: originalChars,
       retired: {
         duplicate: 0,
         discovery: 0,
@@ -328,8 +365,10 @@ export function projectContext<TRaw>(
   }
 
   // Calculate global evidence leases across the entire transcript
-  const globalDiscovery = consumedDiscovery(messages);
-  const globalStaleReads = consumedReads(messages);
+  const currentTurnText =
+    messages.filter((m) => m.role === "user").slice(-1)[0]?.text ?? null;
+  const globalDiscovery = consumedDiscovery(messages, currentTurnText);
+  const globalStaleReads = consumedReads(messages, currentTurnText);
   const activeRounds = new Set<number>();
   for (const round of rounds(messages)) {
     if (
@@ -365,11 +404,11 @@ export function projectContext<TRaw>(
   }
 
   const originalChars = messages.reduce(
-    (sum, message) => sum + message.text.length,
+    (sum, message) => sum + (message.text?.length ?? 0),
     0,
   );
   const projectedChars = projected.reduce(
-    (sum, message) => sum + message.text.length,
+    (sum, message) => sum + (message.text?.length ?? 0),
     0,
   );
   const details = projectionDetails(messages, projected);

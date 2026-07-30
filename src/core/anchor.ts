@@ -1,4 +1,5 @@
 import { taskIdFromInput } from "./continuity";
+import { terms, contentWordCount } from "./lexical";
 import { emptyAnchor, type TaskAnchor } from "./types";
 
 export type TaskBoundary = "continue" | "new";
@@ -7,38 +8,6 @@ const CONTINUATION =
   /^(?:now|also|next|then|finally|and|but|please|okay|ok|continue|proceed|validate|test|document|update|fix)\b/i;
 const NEW_TASK =
   /^(?:new|unrelated|separate)\s+task\b|^switch\s+to\b|\bnew unrelated task\b/i;
-const CONTENT_WORD = /[a-z0-9][a-z0-9'_-]{2,}/gi;
-const STOP_WORDS = new Set([
-  "about",
-  "after",
-  "again",
-  "also",
-  "and",
-  "from",
-  "have",
-  "into",
-  "just",
-  "more",
-  "need",
-  "that",
-  "the",
-  "then",
-  "this",
-  "with",
-]);
-
-function contentWordCount(text: string): number {
-  return text.match(CONTENT_WORD)?.length ?? 0;
-}
-
-function terms(value: string): Set<string> {
-  return new Set(
-    value
-      .toLowerCase()
-      .match(/[a-z0-9_.-]{3,}/g)
-      ?.filter((term) => !STOP_WORDS.has(term)) ?? [],
-  );
-}
 
 export function taskBoundaryForInput(
   input: string,

@@ -10,6 +10,7 @@ import {
   taskGoalFromInput,
 } from "../core/anchor";
 import {
+  extractPhaseLimitedDirectives,
   isPlanningRequest,
   mergeExecutionJournals,
   promotePlan,
@@ -23,6 +24,7 @@ import {
   planPhaseFramingState,
   planProjectionState,
 } from "../core/format";
+import { checkCardInvariants } from "../core/invariants";
 import { projectContext } from "../core/projection";
 import { buildRuntimeCard } from "../core/runtime";
 import {
@@ -444,7 +446,18 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       2,
     );
     const projection = projectContext(normalized, keepRecentTurns);
-    const card = runtimeCard(ctx, normalized);
+    let card = runtimeCard(ctx, normalized);
+    const violations = checkCardInvariants(card);
+    if (
+      violations.some((v) => v.rule === "stale-plan-directive") &&
+      card.plan
+    ) {
+      const { body } = extractPhaseLimitedDirectives(card.plan.content);
+      card = {
+        ...card,
+        plan: { ...card.plan, content: body },
+      };
+    }
     lastCard = formatContextCard(card, {
       planProjectionMode: planProjectionMode(),
       planPhaseFramingMode: planPhaseFramingMode(),
@@ -522,7 +535,10 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       },
     };
     if (pi.getFlag("context-card-audit") !== "off")
-      pi.appendEntry<ProjectionAudit>(AUDIT_ENTRY_TYPE, lastAudit);
+      pi.appendEntry<ProjectionAudit>(AUDIT_ENTRY_TYPE, {
+        ...lastAudit,
+        invariantViolations: violations.length > 0 ? violations : undefined,
+      });
     ctx.ui.setStatus(
       "agent-context-card",
       `${projection.retiredMessages} message(s) retired · ${projection.messages.length} live`,
