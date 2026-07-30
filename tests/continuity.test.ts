@@ -11,7 +11,10 @@ import {
   unresolvedPriorExecution,
 } from "../src/core/continuity";
 import type { ExecutionJournal, TaskSnapshot } from "../src/core/types";
-import { repositoryProvenance, TaskStore } from "../src/pi/task-store";
+import {
+  repositoryProvenance,
+  SessionCardStore,
+} from "../src/pi/session-card-store";
 
 const prior: ExecutionJournal = {
   changes: [
@@ -88,39 +91,41 @@ describe("cross-session continuity", () => {
   });
 });
 
-describe("task snapshot store", () => {
+describe("session card store", () => {
   test("round-trips atomically and refuses to overwrite corruption", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "context-card-"));
+    const cardsDir = await mkdtemp(path.join(tmpdir(), "context-card-cards-"));
     try {
-      const store = new TaskStore(cwd);
+      const store = new SessionCardStore(cardsDir);
       const snapshot: TaskSnapshot = {
         schemaVersion: 1,
-        taskId: "JIRA-123",
-        anchor: { goal: "Plan JIRA-123", createdAtTurn: 0 },
+        sessionId: "session-xyz",
+        anchor: { goal: "Plan the payment refactor", createdAtTurn: 0 },
         execution: prior,
         provenance: repositoryProvenance(cwd),
         updatedAt: "2026-07-21T00:00:00.000Z",
       };
       await store.save(snapshot);
-      expect(await store.load("JIRA-123")).toEqual({
+      expect(await store.load("session-xyz")).toEqual({
         status: "success",
         snapshot,
       });
 
       const revised = { ...snapshot, updatedAt: "2026-07-21T01:00:00.000Z" };
       await store.save(revised);
-      expect(await store.load("JIRA-123")).toEqual({
+      expect(await store.load("session-xyz")).toEqual({
         status: "success",
         snapshot: revised,
       });
 
-      await writeFile(store.pathFor("JIRA-123"), "{broken", "utf8");
-      expect((await store.load("JIRA-123")).status).toBe("corrupt");
+      await writeFile(store.pathFor("session-xyz"), "{broken", "utf8");
+      expect((await store.load("session-xyz")).status).toBe("corrupt");
       await expect(store.save(snapshot)).rejects.toThrow(
         "refusing to overwrite",
       );
     } finally {
       await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
     }
   });
 
@@ -128,33 +133,37 @@ describe("task snapshot store", () => {
     expect(parseTaskSnapshot({ schemaVersion: 1 })).toBeUndefined();
   });
 
-  test("missing tasks fail closed and garbage collection preserves recent state", async () => {
+  test("missing sessions fail closed and garbage collection preserves recent state", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "context-card-gc-"));
+    const cardsDir = await mkdtemp(
+      path.join(tmpdir(), "context-card-gc-cards-"),
+    );
     try {
-      const store = new TaskStore(cwd);
-      expect(await store.load("A-1")).toEqual({ status: "missing" });
-      const snapshot = (taskId: string): TaskSnapshot => ({
+      const store = new SessionCardStore(cardsDir);
+      expect(await store.load("s-1")).toEqual({ status: "missing" });
+      const snapshot = (sessionId: string): TaskSnapshot => ({
         schemaVersion: 1,
-        taskId,
-        anchor: { goal: taskId, createdAtTurn: 0 },
+        sessionId,
+        anchor: { goal: sessionId, createdAtTurn: 0 },
         execution: { changes: [], failures: [] },
         provenance: repositoryProvenance(cwd),
         updatedAt: "2026-07-21T00:00:00.000Z",
       });
-      await store.save(snapshot("A-1"));
-      await store.save(snapshot("A-2"));
+      await store.save(snapshot("s-1"));
+      await store.save(snapshot("s-2"));
       const now = Date.now();
       await utimes(
-        store.pathFor("A-1"),
+        store.pathFor("s-1"),
         new Date(now - 31 * 24 * 60 * 60 * 1_000),
         new Date(now - 31 * 24 * 60 * 60 * 1_000),
       );
       expect(await store.collectGarbage(now)).toBe(1);
-      expect(await store.load("A-1")).toEqual({ status: "missing" });
-      expect((await store.load("A-2")).status).toBe("success");
-      expect(await store.remove("A-2")).toBe(true);
+      expect(await store.load("s-1")).toEqual({ status: "missing" });
+      expect((await store.load("s-2")).status).toBe("success");
+      expect(await store.remove("s-2")).toBe(true);
     } finally {
       await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
     }
   });
 });

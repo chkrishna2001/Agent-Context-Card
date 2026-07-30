@@ -10,21 +10,24 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { parseTaskSnapshot } from "../core/continuity";
 import type { RepositoryProvenance, TaskSnapshot } from "../core/types";
 
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
+const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 export type LoadResult =
   | { status: "success"; snapshot: TaskSnapshot }
   | { status: "missing" }
   | { status: "corrupt"; detail: string };
 
-function filenameFor(taskId: string): string {
-  const encoded = encodeURIComponent(taskId);
-  const digest = createHash("sha256").update(taskId).digest("hex").slice(0, 12);
-  return `${encoded}-${digest}.json`;
+function filenameFor(sessionId: string): string {
+  if (!SAFE_SESSION_ID.test(sessionId)) {
+    throw new Error(`unsafe session id: ${sessionId}`);
+  }
+  return `card-${sessionId}.json`;
 }
 
 function git(cwd: string, args: string[]): string | undefined {
@@ -71,45 +74,53 @@ export function repositoryProvenance(cwd: string): RepositoryProvenance {
   };
 }
 
-export class TaskStore {
+/**
+ * Persists one context card per Pi session, keyed by the session's own ID.
+ * Global by default (not project-local) so a card survives a process
+ * restart regardless of whether the user ever typed a ticket-ID-shaped
+ * string; the previous task-ID-keyed store required that and, in practice,
+ * almost never persisted anything.
+ */
+export class SessionCardStore {
   readonly directory: string;
   private readonly corrupt = new Set<string>();
 
-  constructor(cwd: string) {
-    this.directory = path.join(cwd, ".agent-context-card", "tasks");
+  constructor(baseDir?: string) {
+    this.directory =
+      baseDir ?? path.join(homedir(), ".agent-context-card", "cards");
   }
 
-  pathFor(taskId: string): string {
-    return path.join(this.directory, filenameFor(taskId));
+  pathFor(sessionId: string): string {
+    return path.join(this.directory, filenameFor(sessionId));
   }
 
-  async load(taskId: string): Promise<LoadResult> {
-    const file = this.pathFor(taskId);
+  async load(sessionId: string): Promise<LoadResult> {
+    const file = this.pathFor(sessionId);
     let text: string;
     try {
       text = await readFile(file, "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT")
         return { status: "missing" };
-      this.corrupt.add(taskId);
+      this.corrupt.add(sessionId);
       return { status: "corrupt", detail: String(error) };
     }
     try {
       const snapshot = parseTaskSnapshot(JSON.parse(text));
-      if (!snapshot || snapshot.taskId !== taskId)
-        throw new Error("snapshot schema or task ID is invalid");
+      if (!snapshot || snapshot.sessionId !== sessionId)
+        throw new Error("snapshot schema or session ID is invalid");
       return { status: "success", snapshot };
     } catch (error) {
-      this.corrupt.add(taskId);
+      this.corrupt.add(sessionId);
       return { status: "corrupt", detail: String(error) };
     }
   }
 
   async save(snapshot: TaskSnapshot): Promise<void> {
-    if (this.corrupt.has(snapshot.taskId))
-      throw new Error("refusing to overwrite a corrupt task snapshot");
+    if (this.corrupt.has(snapshot.sessionId))
+      throw new Error("refusing to overwrite a corrupt session card");
     await mkdir(this.directory, { recursive: true });
-    const target = this.pathFor(snapshot.taskId);
+    const target = this.pathFor(snapshot.sessionId);
     const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
     try {
       await writeFile(
@@ -124,10 +135,10 @@ export class TaskStore {
     }
   }
 
-  async remove(taskId: string): Promise<boolean> {
+  async remove(sessionId: string): Promise<boolean> {
     try {
-      await unlink(this.pathFor(taskId));
-      this.corrupt.delete(taskId);
+      await unlink(this.pathFor(sessionId));
+      this.corrupt.delete(sessionId);
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;

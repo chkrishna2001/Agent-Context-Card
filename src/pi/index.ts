@@ -55,7 +55,7 @@ import {
   normalizeMessages,
   scopeMessagesToGoal,
 } from "./normalize";
-import { repositoryProvenance, TaskStore } from "./task-store";
+import { repositoryProvenance, SessionCardStore } from "./session-card-store";
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value), 10);
@@ -94,10 +94,13 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let planCandidate: PlanCandidate | undefined;
   let resumedExecution: ExecutionJournal = emptyExecutionJournal();
   let resumedProvenance: RepositoryProvenance | undefined;
-  let store: TaskStore | undefined;
-  let mayLoadCrossSession = false;
   let planningTurn = false;
   let turnMutated = false;
+  // Global by default; overridable so tests never touch the real user
+  // profile directory.
+  const sessionStore = new SessionCardStore(
+    process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR,
+  );
 
   const sessionIdOf = (ctx: ExtensionContext): string | undefined => {
     const sessionManager = ctx.sessionManager as
@@ -199,8 +202,6 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     );
     previousTurnSettled =
       assistant?.role === "assistant" && assistant.stopReason === "stop";
-    store = new TaskStore(ctx.cwd);
-    mayLoadCrossSession = messages.length === 0;
   };
 
   const persistPlanState = (): void =>
@@ -210,13 +211,16 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       candidate: planCandidate,
     });
 
-  const saveTask = async (ctx: ExtensionContext): Promise<void> => {
-    if (!taskId || !store || !anchor.goal) return;
+  const saveSessionCard = async (ctx: ExtensionContext): Promise<void> => {
+    if (!anchor.goal) return;
+    const sessionId = sessionIdOf(ctx);
+    if (!sessionId) return;
     const current = buildExecutionJournal(
       normalizeMessages(branchMessages(ctx.sessionManager.getBranch())),
     );
     const snapshot: TaskSnapshot = {
       schemaVersion: 1,
+      sessionId,
       taskId,
       anchor,
       plan,
@@ -226,7 +230,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       updatedAt: new Date().toISOString(),
     };
     try {
-      await store.save(snapshot);
+      await sessionStore.save(snapshot);
       taskAudit("save", "success");
     } catch (error) {
       taskAudit("save", "failed", String(error));
@@ -271,11 +275,47 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     return true;
   };
 
+  const resumeFromSessionCard = async (
+    ctx: ExtensionContext,
+  ): Promise<void> => {
+    if (anchor.goal) return;
+    const sessionId = sessionIdOf(ctx);
+    if (!sessionId) return;
+    const loaded = await sessionStore.load(sessionId);
+    if (loaded.status === "success") {
+      const snapshot = loaded.snapshot;
+      anchor = snapshot.anchor;
+      taskId = snapshot.taskId;
+      plan = snapshot.plan;
+      planCandidate = snapshot.candidate;
+      resumedExecution = snapshot.execution;
+      resumedProvenance = snapshot.provenance;
+      pi.appendEntry<ResumeStateDetails>(RESUME_ENTRY_TYPE, { snapshot });
+      pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, {
+        anchor,
+        reset: true,
+      });
+      persistPlanState();
+      taskAudit(
+        "load",
+        "success",
+        `sessionId=${sessionId}; reason=session-restart`,
+      );
+    } else if (loaded.status === "corrupt") {
+      taskAudit(
+        "load",
+        "corrupt",
+        `sessionId=${sessionId}; detail=${loaded.detail}`,
+      );
+    }
+  };
+
   pi.on("session_start", async (_event, ctx) => {
     reconstruct(ctx);
+    await resumeFromSessionCard(ctx);
     try {
-      const removed = await store?.collectGarbage();
-      if (removed) taskAudit("gc", "success", `${removed} expired task(s)`);
+      const removed = await sessionStore.collectGarbage();
+      if (removed) taskAudit("gc", "success", `${removed} expired card(s)`);
     } catch (error) {
       taskAudit("gc", "failed", String(error));
     }
@@ -283,7 +323,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     taskAudit(
       "session",
       "info",
-      `sessionId=${sessionIdOf(ctx) ?? "unknown"}; branchEntries=${branch.length}; branchMessages=${branchMessages(branch).length}; mayLoadCrossSession=${String(mayLoadCrossSession)}`,
+      `sessionId=${sessionIdOf(ctx) ?? "unknown"}; branchEntries=${branch.length}; branchMessages=${branchMessages(branch).length}`,
     );
   });
   pi.on("session_tree", async (_event, ctx) => {
@@ -292,81 +332,11 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     taskAudit(
       "session",
       "info",
-      `tree sessionId=${sessionIdOf(ctx) ?? "unknown"}; branchEntries=${branch.length}; branchMessages=${branchMessages(branch).length}; mayLoadCrossSession=${String(mayLoadCrossSession)}`,
+      `tree sessionId=${sessionIdOf(ctx) ?? "unknown"}; branchEntries=${branch.length}; branchMessages=${branchMessages(branch).length}`,
     );
   });
-  pi.on("input", async (event, ctx) => {
+  pi.on("input", async (event) => {
     const requestedId = taskIdFromInput(event.text);
-    const sessionId = sessionIdOf(ctx) ?? "unknown";
-    let resumed = false;
-    if (mayLoadCrossSession) {
-      taskAudit(
-        "resume-check",
-        "info",
-        `sessionId=${sessionId}; reason=empty-branch; requestedId=${requestedId ?? "none"}`,
-      );
-      mayLoadCrossSession = false;
-      if (!requestedId) {
-        taskAudit(
-          "resume-check",
-          "skipped",
-          `sessionId=${sessionId}; reason=no-task-id; input=${JSON.stringify(event.text)}`,
-        );
-      } else if (!store) {
-        taskAudit(
-          "resume-check",
-          "skipped",
-          `sessionId=${sessionId}; reason=no-store; taskId=${requestedId}`,
-        );
-      } else {
-        taskId = requestedId;
-        taskAudit(
-          "resume-check",
-          "info",
-          `sessionId=${sessionId}; reason=attempt-load; taskId=${requestedId}`,
-        );
-        const loaded = await store.load(requestedId);
-        if (loaded.status === "success") {
-          const snapshot = loaded.snapshot;
-          anchor = snapshot.anchor;
-          plan = snapshot.plan;
-          planCandidate = snapshot.candidate;
-          resumedExecution = snapshot.execution;
-          resumedProvenance = snapshot.provenance;
-          pi.appendEntry<ResumeStateDetails>(RESUME_ENTRY_TYPE, { snapshot });
-          pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, {
-            anchor,
-            reset: true,
-          });
-          persistPlanState();
-          taskAudit(
-            "load",
-            "success",
-            `sessionId=${sessionId}; taskId=${requestedId}`,
-          );
-          resumed = true;
-        } else if (loaded.status === "missing") {
-          taskAudit(
-            "load",
-            "missing",
-            `sessionId=${sessionId}; taskId=${requestedId}`,
-          );
-        } else {
-          taskAudit(
-            "load",
-            "corrupt",
-            `sessionId=${sessionId}; taskId=${requestedId}; detail=${loaded.detail}`,
-          );
-          taskId = undefined;
-        }
-      }
-    } else {
-      taskAudit(
-        "resume-check",
-        "skipped",
-        `sessionId=${sessionId}; reason=non-empty-branch; requestedId=${requestedId ?? "none"}`,
-      );
-    }
 
     planningTurn = isPlanningRequest(event.text);
     turnMutated = false;
@@ -381,7 +351,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       latestRequest,
       settled: previousTurnSettled,
     });
-    if (!resumed && (!anchor.goal || boundary === "new")) {
+    if (!anchor.goal || boundary === "new") {
       if (boundary === "new" && anchor.goal) {
         plan = undefined;
         planCandidate = undefined;
@@ -420,10 +390,10 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     }
     if (previousTurnSettled) {
       currentTurn++;
-      await saveTask(ctx);
+      await saveSessionCard(ctx);
     }
   });
-  pi.on("session_shutdown", async (_event, ctx) => saveTask(ctx));
+  pi.on("session_shutdown", async (_event, ctx) => saveSessionCard(ctx));
 
   pi.on("context", async (event, ctx) => {
     const withoutCards = event.messages.filter(
@@ -571,12 +541,12 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   pi.registerCommand("card-reset", {
     description: "Clear the active context card",
     handler: async (_args, ctx) => {
-      const closingTask = taskId;
-      if (closingTask)
+      const sessionId = sessionIdOf(ctx);
+      if (sessionId)
         taskAudit(
           "close",
           "info",
-          `kept snapshot for taskId=${closingTask}; sessionId=${sessionIdOf(ctx) ?? "unknown"}`,
+          `kept session card on disk; sessionId=${sessionId}`,
         );
       anchor = emptyAnchor();
       latestRequest = "";

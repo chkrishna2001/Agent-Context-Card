@@ -6,6 +6,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Deterministic phase-limited-directive extraction that scans the durable
+  plan body itself, not only the `## Process Notes` header, so a
+  planning-only constraint (for example "do not modify files") retires at
+  implementation start regardless of which section the model filed it under.
+- A conservative reference-overlap guard in projection that keeps a
+  discovery round or file read live for one extra turn when the current
+  request still shares a path or term with it, instead of retiring purely on
+  the existing trigger events.
+- A card invariant linter (`src/core/invariants.ts`) that re-checks the
+  assembled card immediately before formatting, strips any stale planning
+  directive that still survived, and records every violation in the existing
+  non-model-visible audit entry.
+- A session-ID-keyed persistent card store (`src/pi/session-card-store.ts`),
+  saved unconditionally on every settled turn and session shutdown, and
+  consulted at session start whenever the session's own branch replay comes
+  up empty.
+
+### Changed
+
+- Cross-session recovery is now keyed by the Pi session ID instead of a
+  typed ticket-ID string, and is unconditional: a session no longer needs a
+  message matching the task-ID pattern for its card to persist or resume.
+  `TaskSnapshot.taskId` is now optional and used only as a display label.
+- Persisted card state now lives under
+  `%USERPROFILE%/.agent-context-card/cards/card-<sessionId>.json` (global)
+  instead of `<repo>/.agent-context-card/tasks/<taskId>.json`
+  (project-local).
+
+### Removed
+
+- The task-ID-typed cross-session bridge (`TaskStore`) and its
+  `.agent-context-card/tasks/` file layout.
+
+### Fixed
+
+- Sessions that never included a ticket-ID-shaped string — most real usage —
+  previously never persisted a card to disk at all, so the card was lost on
+  any process restart. Saving is no longer gated on a typed task ID.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added

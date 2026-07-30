@@ -241,7 +241,8 @@ export function parseTaskSnapshot(value: unknown): TaskSnapshot | undefined {
   const candidate = value as Partial<TaskSnapshot>;
   if (
     candidate.schemaVersion !== 1 ||
-    typeof candidate.taskId !== "string" ||
+    typeof candidate.sessionId !== "string" ||
+    (candidate.taskId !== undefined && typeof candidate.taskId !== "string") ||
     !candidate.anchor ||
     typeof candidate.anchor.goal !== "string" ||
     typeof candidate.anchor.createdAtTurn !== "number" ||

@@ -108,7 +108,8 @@ export interface RepositoryProvenance {
 
 export interface TaskSnapshot {
   schemaVersion: 1;
-  taskId: string;
+  sessionId: string;
+  taskId?: string;
   anchor: TaskAnchor;
   plan?: PinnedPlan;
   candidate?: PlanCandidate;

@@ -31,8 +31,10 @@ agent-context-card takes a different approach:
 - **No arbitrary character cap.** Context follows task complexity.
 - **Inspectable decisions.** Retirement metrics stay outside model context.
 - **Automatic task isolation.** Unrelated work starts with a clean task scope.
-- **Experimental task continuity.** Exact ticket IDs can resume plans and
-  historical execution facts across Pi sessions without carrying stale reads.
+- **Automatic session continuity.** The card persists per Pi session and
+  recovers plans and historical execution facts across a process restart on
+  the same session, without carrying stale reads and without typing a ticket
+  ID.
 
 ## Install
 
@@ -68,12 +70,15 @@ Project home: [github.com/chkrishna2001/Agent-Context-Card](https://github.com/c
 
 The model receives a small derived card plus the projected live transcript. It is never asked to update or restate the card.
 
-Cross-session continuity is opt-in through an exact task ID such as `JIRA-123`
-or `django__django-12345`. A planning request captures the agent's exact final
-plan automatically; continuing the same task promotes it into the card. Stored
-execution facts are labeled as prior-session facts, and file-read evidence is
-never resumed. State is kept under `.agent-context-card/tasks/`. `/card-reset`
-clears only the in-session card state and keeps the stored snapshot.
+Cross-session continuity is automatic and keyed by the Pi session ID, not by
+anything the user types. A planning request captures the agent's exact final
+plan automatically; the same session promotes it into the card. If a
+session's own branch replay comes up empty at start — for example after a
+process restart — the card recovers from a stored snapshot for that exact
+session ID. Stored execution facts are labeled as prior-session facts, and
+file-read evidence is never resumed. State is kept under
+`%USERPROFILE%/.agent-context-card/cards/`. `/card-reset` clears only the
+in-session card state and keeps the stored snapshot.
 
 ```mermaid
 flowchart LR

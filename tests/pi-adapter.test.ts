@@ -14,7 +14,7 @@ import { scopeMessagesToGoal } from "../src/pi/normalize";
 
 type Handler = (...args: any[]) => any;
 
-function harness(cwd = process.cwd()) {
+function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
   const flags = new Map<string, string | boolean>();
   const handlers = new Map<string, Handler[]>();
   const tools: ToolDefinition[] = [];
@@ -38,7 +38,10 @@ function harness(cwd = process.cwd()) {
   agentContextCard(pi);
   const context = {
     cwd,
-    sessionManager: { getBranch: () => branch },
+    sessionManager: {
+      getBranch: () => branch,
+      getSessionId: () => options.sessionId,
+    },
     model: { provider: "test", id: "model", contextWindow: 128_000 },
     ui: { setStatus() {}, notify() {} },
   } as unknown as ExtensionContext;
@@ -215,10 +218,13 @@ describe("Pi adapter", () => {
     }
   });
 
-  test("automatically resumes an exact plan without a maintenance command", async () => {
+  test("resumes the pinned plan across a process restart on the same session ID", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "context-card-pi-"));
+    const cardsDir = await mkdtemp(path.join(tmpdir(), "context-card-cards-"));
+    const previousEnv = process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+    process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = cardsDir;
     try {
-      const first = harness(cwd);
+      const first = harness(cwd, { sessionId: "session-restart" });
       await first.start();
       await first.input("Create a plan for JIRA-123");
       await first.turnEnd({
@@ -227,13 +233,21 @@ describe("Pi adapter", () => {
         stopReason: "stop",
         timestamp: 2,
       } as AgentMessage);
+      await first.input("Implement JIRA-123 now");
+      await first.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "Working on it." }],
+        stopReason: "stop",
+        timestamp: 3,
+      } as AgentMessage);
 
-      const second = harness(cwd);
+      // A brand-new harness instance with an empty branch, same session ID:
+      // simulates the Pi process restarting mid-session.
+      const second = harness(cwd, { sessionId: "session-restart" });
       second.setFlag("context-card-plan-framing", "scope-note");
       await second.start();
-      await second.input("Implement JIRA-123 now");
       const output = await second.project([
-        { role: "user", content: "Implement JIRA-123 now", timestamp: 3 },
+        { role: "user", content: "continue", timestamp: 4 },
       ]);
       expect(JSON.stringify(output?.messages[0])).toContain(
         "TASK ID: JIRA-123",
@@ -242,16 +256,93 @@ describe("Pi adapter", () => {
         "PINNED PLAN (revision 1)",
       );
       expect(JSON.stringify(output?.messages[0])).toContain(
-        "The current request is post-planning",
-      );
-      expect(
-        (second.entries.at(-1)?.data as any).continuity.planPhaseFramingState,
-      ).toBe("post-planning");
-      expect(JSON.stringify(output?.messages[0])).toContain(
         "1. Inspect\\n  2. Implement",
       );
     } finally {
+      if (previousEnv === undefined)
+        delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+      else process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = previousEnv;
       await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("never persists or resumes anything without a session ID", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-card-pi-nosid-"));
+    const cardsDir = await mkdtemp(
+      path.join(tmpdir(), "context-card-cards-nosid-"),
+    );
+    const previousEnv = process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+    process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = cardsDir;
+    try {
+      const first = harness(cwd);
+      await first.start();
+      await first.input("Refactor the payment module");
+      await first.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "Refactored." }],
+        stopReason: "stop",
+        timestamp: 2,
+      } as AgentMessage);
+
+      const second = harness(cwd);
+      await second.start();
+      const output = await second.project([
+        { role: "user", content: "continue", timestamp: 3 },
+      ]);
+      expect(JSON.stringify(output?.messages[0])).not.toContain(
+        "Refactor the payment module",
+      );
+    } finally {
+      if (previousEnv === undefined)
+        delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+      else process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = previousEnv;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("a session with no typed ticket ID still persists and recovers on the same session ID", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-card-pi-nl-"));
+    const cardsDir = await mkdtemp(
+      path.join(tmpdir(), "context-card-cards-nl-"),
+    );
+    const previousEnv = process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+    process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = cardsDir;
+    try {
+      const first = harness(cwd, { sessionId: "session-nl" });
+      await first.start();
+      await first.input("Refactor the payment module");
+      await first.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "Refactored." }],
+        stopReason: "stop",
+        timestamp: 2,
+      } as AgentMessage);
+
+      const second = harness(cwd, { sessionId: "session-nl" });
+      await second.start();
+      const output = await second.project([
+        { role: "user", content: "continue", timestamp: 3 },
+      ]);
+      expect(JSON.stringify(output?.messages[0])).toContain(
+        "Refactor the payment module",
+      );
+
+      const other = harness(cwd, { sessionId: "session-other" });
+      await other.start();
+      const otherOutput = await other.project([
+        { role: "user", content: "continue", timestamp: 3 },
+      ]);
+      expect(JSON.stringify(otherOutput?.messages[0])).not.toContain(
+        "Refactor the payment module",
+      );
+    } finally {
+      if (previousEnv === undefined)
+        delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+      else process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = previousEnv;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
     }
   });
 });
