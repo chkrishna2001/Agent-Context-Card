@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-23",
-  "sourceDocument": "docs/automated-multisession-evaluation.md",
+  "updatedAt": "2026-07-30",
+  "sourceDocument": "AGENTS.md",
   "metricDefinitions": {
     "duplicateCalls": "Raw exact repeated tool-call signatures; retained for compatibility with all historical reports.",
     "sameStateDuplicateCalls": "Exact repeated signatures without a successful relevant file mutation or global mutation boundary; available for traces analyzed after 2026-07-22."
@@ -100,42 +100,6 @@
         "toolErrors": -100,
         "duplicateCalls": -100,
         "durationMs": -25.7
-      }
-    },
-    {
-      "id": "cross-session-smoke",
-      "date": "2026-07-21",
-      "kind": "cross-session-ab",
-      "claimable": true,
-      "model": "llama-cloud/gemma4:31b",
-      "thinking": "off requested; wire unverified; reported reasoning 0",
-      "correctness": { "baseline": "pass", "card": "pass" },
-      "baseline": {
-        "providerInputTokens": 24457,
-        "providerRequests": 16,
-        "outputTokens": 615,
-        "toolCalls": 12,
-        "toolErrors": 0,
-        "duplicateCalls": 0,
-        "durationMs": 71140
-      },
-      "card": {
-        "providerInputTokens": 21717,
-        "providerRequests": 13,
-        "outputTokens": 491,
-        "toolCalls": 9,
-        "toolErrors": 0,
-        "duplicateCalls": 0,
-        "durationMs": 71860
-      },
-      "changePercent": {
-        "providerInputTokens": -11.2,
-        "providerRequests": -18.8,
-        "outputTokens": -20.2,
-        "toolCalls": -25,
-        "toolErrors": null,
-        "duplicateCalls": null,
-        "durationMs": 1
       }
     },
     {

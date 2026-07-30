@@ -217,39 +217,22 @@ The card measured 415 characters at the end of turn 1, 595 after documentation, 
 - Both runs completed all four tasks and built the project.
 - The card run made the smaller implementation change and preserved an existing background fallback that the baseline removed unnecessarily.
 
-## Automated cross-session smoke proof
+## Automated multi-turn A/B proof
 
-The repository now has an isolated Pi A/B runner at
-`scripts/evaluation/run.mjs`. It copies or checks out a workspace per variant,
-runs ordered sessions, grades repository commands, hashes file changes, asserts
-continuity invariants, and emits raw traces plus JSON and Markdown reports under
-the ignored `.agent-context-card/e/` directory.
+The repository has an isolated Pi A/B runner at `scripts/evaluation/run.mjs`.
+It copies or checks out a workspace per variant, runs an ordered turn
+sequence within one continuing Pi session, grades repository commands,
+hashes file changes, asserts continuity invariants, and emits raw traces
+plus JSON and Markdown reports under the ignored `.agent-context-card/e/`
+directory. This is the harness behind the ten-session mixed proof below; it
+measures token/tool/duration savings and correctness, the actual thesis —
+not cross-session recovery, which is a supporting mechanism covered by unit
+tests, not a real-model evaluation.
 
-The first passing live run used `llama-cloud/gemma4:31b` with Pi requesting thinking off on a
-four-session plan, implementation, validation, and unrelated-task sequence. Both
-variants passed `node --test counter.check.mjs` and changed only `counter.mjs`.
-
-| Metric                | Baseline | Context card | Change |
-| --------------------- | -------: | -----------: | -----: |
-| Provider requests     |       16 |           13 | -18.8% |
-| Provider input tokens |   24,457 |       21,717 | -11.2% |
-| Output tokens         |      615 |          491 | -20.2% |
-| Tool calls            |       12 |            9 | -25.0% |
-| Tool errors           |        0 |            0 |  equal |
-| Duration              |  71.14 s |      71.86 s |  +1.0% |
-
-All card assertions passed: the plan was captured and promoted without a user
-command, later sessions resumed revision 1 with zero cross-session hot evidence,
-and the unrelated task inherited neither the task nor its plan. The provider
-reported zero cost and cache tokens, so those metrics were recorded but were not
-comparable.
-
-The first attempt caught a real deterministic bug: “follow the previously
-approved plan” was treated as a planning request. Planning detection now matches
-explicit creation/revision intent, with a regression test. This is a single tiny
-fixture and one model run; it proves the harness and continuity path, not broad
-reliability. The protocol and full metric inventory are in
-`docs/automated-multisession-evaluation.md`.
+An early tiny fixture run caught a real deterministic bug: “follow the
+previously approved plan” was treated as a planning request. Planning
+detection now matches explicit creation/revision intent, with a regression
+test.
 
 ## First SWE-bench Verified pilot
 
@@ -316,9 +299,10 @@ and one non-resolution; do not report this as a pass-rate estimate.
 
 The first attempt at this task was invalid because the baseline timed out and
 the card exhausted its provider session allowance. Its diagnostic metrics are
-retained in `docs/automated-multisession-evaluation.md` and explicitly excluded
-from performance claims. The runner now counts provider errors separately and
-stops a variant after a provider-error response.
+retained in `evaluation/results/evidence-ledger.json`'s excluded-diagnostics
+list and explicitly excluded from performance claims. The runner now counts
+provider errors separately and stops a variant after a provider-error
+response.
 
 Sanitized claimable metrics and excluded diagnostics are stored in
 `evaluation/results/evidence-ledger.json`. A regression test recalculates each

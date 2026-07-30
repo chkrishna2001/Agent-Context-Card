@@ -17,7 +17,6 @@
     "LICENSE"
   ],
   "scripts": {
-    "eval:pi": "node scripts/evaluation/run.mjs --config evaluation/configs/pi-cross-session-smoke.json",
     "eval:pi:ten-turn": "node scripts/evaluation/run.mjs --config evaluation/configs/pi-ten-turn-mixed.json",
     "eval:pi:nano-low": "node scripts/evaluation/run.mjs --config evaluation/configs/pi-ten-turn-mixed.json --model ai-inference-router/openai/gpt-5-nano --thinking low",
     "eval:pi:nano-low-framing": "node scripts/evaluation/run.mjs --config evaluation/configs/pi-ten-turn-plan-framing.json --model ai-inference-router/openai/gpt-5-nano --thinking low",

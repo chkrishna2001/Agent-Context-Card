@@ -105,11 +105,7 @@ The implementation turn retained essentially the same amount of evidence. Across
 
 This is a research preview, not a universal performance claim. Read the [design history, full protocol, per-turn data, limitations, and release gates](docs/design-and-evaluation.md).
 
-### Automated cross-session evaluation
-
-Run the isolated Pi baseline/card smoke test with:
-
-    bun run eval:pi
+### Automated multi-turn evaluation
 
 A checked-in ten-session mixed gate adds planning, implementation, validation,
 documentation, review, and unrelated-task boundaries:
@@ -118,13 +114,9 @@ documentation, review, and unrelated-task boundaries:
 
 It grades a real failing test, verifies workspace hashes and continuity
 invariants, and captures provider, tool, timing, session, projection, and task
-state metrics. The finalized live run preserved correctness while reducing
-provider input by 11.2%, requests by 18.8%, and tool calls by 25.0%; duration was
-effectively flat at 1.0% slower. See the [automated protocol and full result](docs/automated-multisession-evaluation.md).
-
-The ten-session mixed gate also passed on both sides with the
-`ai-inference-router/mycoder` route. The card used 29.2% fewer provider
-requests, 34.2% fewer tool calls, had zero versus four tool errors, and completed
+state metrics. The finalized live run with the `ai-inference-router/mycoder`
+route passed on both sides. The card used 29.2% fewer provider requests,
+34.2% fewer tool calls, had zero versus four tool errors, and completed
 17.5% faster. The router did not report token usage, so no token comparison is
 claimed for this run. Pi declared the alias `reasoning: false`, and all 107
 audited router requests omitted `reasoning_effort`; effort is not applicable to
