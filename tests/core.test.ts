@@ -180,6 +180,153 @@ describe("card extraction", () => {
     expect(card).toContain("TASK ID: JIRA-123");
   });
 
+  test("renders flat top-level fields in the documented order", () => {
+    const card = formatContextCard({
+      goal: "Implement JIRA-123",
+      taskId: "JIRA-123",
+      capabilities: {
+        description: "Deterministic context projection",
+        packageName: "agent-context-card",
+        packageManager: "bun",
+        documentation: ["README.md"],
+        validation: ["bun test"],
+      },
+      execution: {
+        changes: [
+          {
+            action: "edit source.ts",
+            kind: "change",
+            status: "success",
+            count: 1,
+          },
+          {
+            action: "shell_command bun test",
+            kind: "validation",
+            status: "success",
+            count: 2,
+          },
+        ],
+        failures: [
+          {
+            action: "edit missing.ts",
+            kind: "change",
+            status: "failed",
+            count: 1,
+            detail: "ENOENT",
+          },
+        ],
+      },
+      pending: ["verify rebuild"],
+      findings: [{ topic: "schema", detail: "no caps allowed" }],
+      repo: {
+        root: "C:/Users/chkri/source/repos/agent-context-card",
+        head: "abcdef0123456789abcdef0123456789abcdef01",
+      },
+    });
+    expect(card).toContain("goal: Implement JIRA-123");
+    expect(card).toContain("TASK ID: JIRA-123");
+    expect(card).toContain("project: Deterministic context projection");
+    expect(card).toContain(
+      "repo: C:/Users/chkri/source/repos/agent-context-card @ abcdef01",
+    );
+    expect(card).toContain(
+      "what happened: edit source.ts; shell_command bun test ×2",
+    );
+    expect(card).toContain("what's pending: verify rebuild");
+    expect(card).toContain("findings: schema: no caps allowed");
+    expect(card).toContain("failures: edit missing.ts — ENOENT");
+    const goalIdx = card.indexOf("goal:");
+    const taskIdIdx = card.indexOf("TASK ID:");
+    const projectIdx = card.indexOf("project:");
+    const repoIdx = card.indexOf("repo:");
+    const whatIdx = card.indexOf("what happened:");
+    const pendingIdx = card.indexOf("what's pending:");
+    const findingsIdx = card.indexOf("findings:");
+    const failuresIdx = card.indexOf("failures:");
+    expect(goalIdx).toBeLessThan(taskIdIdx);
+    expect(taskIdIdx).toBeLessThan(projectIdx);
+    expect(projectIdx).toBeLessThan(repoIdx);
+    expect(repoIdx).toBeLessThan(whatIdx);
+    expect(whatIdx).toBeLessThan(pendingIdx);
+    expect(pendingIdx).toBeLessThan(findingsIdx);
+    expect(findingsIdx).toBeLessThan(failuresIdx);
+  });
+
+  test("omits empty fields entirely rather than rendering blanks", () => {
+    const card = formatContextCard({
+      goal: "Inspect the project",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+    });
+    expect(card).not.toContain("project:");
+    expect(card).not.toContain("repo:");
+    expect(card).not.toContain("what happened:");
+    expect(card).not.toContain("what's pending:");
+    expect(card).not.toContain("findings:");
+    expect(card).not.toContain("failures:");
+  });
+
+  test("renders repo from a headless provenance as just the root path", () => {
+    const card = formatContextCard({
+      goal: "Inspect",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+      repo: {
+        root: "C:/work/no-git",
+      },
+    });
+    expect(card).toContain("repo: C:/work/no-git");
+    expect(card).not.toContain("@");
+  });
+
+  test("renders files read between findings and failures when present", () => {
+    const card = formatContextCard({
+      goal: "Inspect",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+      findings: [{ topic: "todo", detail: "see helper" }],
+      filesRead: [
+        {
+          path: "src/a.ts",
+          version: "1",
+          toolCallId: "a",
+          state: "active",
+        },
+        {
+          path: "src/b.ts",
+          version: "2",
+          toolCallId: "b",
+          state: "consumed",
+        },
+      ],
+    });
+    expect(card).toContain(
+      "files read: src/a.ts (active), src/b.ts (consumed)",
+    );
+    const findingsIdx = card.indexOf("findings:");
+    const filesIdx = card.indexOf("files read:");
+    expect(findingsIdx).toBeGreaterThan(-1);
+    expect(filesIdx).toBeGreaterThan(findingsIdx);
+    expect(card).not.toContain("failures:");
+  });
+
+  test("omits files read line entirely when filesRead is empty or absent", () => {
+    const empty = formatContextCard({
+      goal: "Inspect",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+      filesRead: [],
+    });
+    expect(empty).not.toContain("files read:");
+
+    const missing = formatContextCard({
+      goal: "Inspect",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+    });
+    expect(missing).not.toContain("files read:");
+  });
+
   test("phase-aware projection retires a completed plan body only outside execution phases", () => {
     const runtimeCard = {
       goal: "Plan JIRA-124",

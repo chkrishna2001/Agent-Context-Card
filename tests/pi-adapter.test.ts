@@ -13,6 +13,9 @@ import {
   ANCHOR_ENTRY_TYPE,
   AUDIT_ENTRY_TYPE,
   CARD_MESSAGE_TYPE,
+  CARD_NUDGE_MESSAGE_TYPE,
+  CARD_STATE_ENTRY_TYPE,
+  TASK_STATE_AUDIT_ENTRY_TYPE,
 } from "../src/core/types";
 import { scopeMessagesToGoal } from "../src/pi/normalize";
 
@@ -23,6 +26,7 @@ function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
   const handlers = new Map<string, Handler[]>();
   const tools: ToolDefinition[] = [];
   const entries: Array<{ customType: string; data: unknown }> = [];
+  const sentMessages: Array<{ message: any; options?: any }> = [];
   const branch: any[] = [];
   const pi = {
     registerFlag(name: string, options: { default?: string | boolean }) {
@@ -38,6 +42,9 @@ function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
     on(event: string, handler: Handler) {
       handlers.set(event, [...(handlers.get(event) ?? []), handler]);
     },
+    sendMessage(message: any, options?: any) {
+      sentMessages.push({ message, options });
+    },
   } as unknown as ExtensionAPI;
   agentContextCard(pi);
   const context = {
@@ -52,6 +59,7 @@ function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
   return {
     tools,
     entries,
+    sentMessages,
     branch: () => [...branch],
     setFlag(name: string, value: string | boolean) {
       flags.set(name, value);
@@ -75,6 +83,14 @@ function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
         message: { role: "user", content: text, timestamp: Date.now() },
       });
     },
+    async toolExecutionEnd(event: {
+      toolName: string;
+      isError?: boolean;
+      result?: any;
+    }) {
+      for (const handler of handlers.get("tool_execution_end") ?? [])
+        await handler(event, context);
+    },
     async turnEnd(message: AgentMessage) {
       branch.push({ type: "message", message });
       for (const handler of handlers.get("turn_end") ?? [])
@@ -90,13 +106,13 @@ function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
 }
 
 describe("Pi adapter", () => {
-  test("registers no model-facing tools and keeps audit outside context", async () => {
+  test("registers no model-facing tools beyond update_card and keeps audit outside context", async () => {
     const extension = harness();
     await extension.start();
     const output = await extension.project([
       { role: "user", content: "Inspect the project", timestamp: 1 },
     ]);
-    expect(extension.tools).toEqual([]);
+    expect(extension.tools.map((tool) => tool.name)).toEqual(["update_card"]);
     expect(output?.messages[0]).toMatchObject({
       role: "custom",
       customType: CARD_MESSAGE_TYPE,
@@ -393,6 +409,346 @@ describe("Pi adapter", () => {
       expect(JSON.stringify(otherOutput?.messages[0])).not.toContain(
         "Refactor the payment module",
       );
+    } finally {
+      if (previousEnv === undefined)
+        delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+      else process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = previousEnv;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("update_card persists CardState and survives a simulated restart", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-card-state-"));
+    const cardsDir = await mkdtemp(
+      path.join(tmpdir(), "context-card-state-cards-"),
+    );
+    const previousEnv = process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+    process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = cardsDir;
+    try {
+      const first = harness(cwd, { sessionId: "session-state" });
+      await first.start();
+      await first.input("Implement the card feature");
+      await first.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "Working on it." }],
+        stopReason: "stop",
+        timestamp: 2,
+      } as AgentMessage);
+      const tool = first.tools.find((t) => t.name === "update_card");
+      expect(tool).toBeDefined();
+      if (!tool) throw new Error("update_card tool missing");
+      const updated = await tool.execute(
+        "call-1",
+        {
+          pending: ["verify rebuild"],
+          findings: [{ topic: "schema", detail: "no caps allowed" }],
+        },
+        undefined,
+        undefined,
+        {} as any,
+      );
+      expect((updated as any).content[0].text).toBe("Card updated.");
+      await first.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "Done." }],
+        stopReason: "stop",
+        timestamp: 3,
+      } as AgentMessage);
+
+      // Brand-new harness with an empty branch, same session ID: simulates
+      // a Pi process restart mid-session. The card must come back via
+      // SessionCardStore, not by re-persisting fresh state.
+      const second = harness(cwd, { sessionId: "session-state" });
+      await second.start();
+      const restored = second.tools.find((t) => t.name === "update_card");
+      expect(restored).toBeDefined();
+      const readState = async () => {
+        const noop = await restored!.execute(
+          "probe",
+          {},
+          undefined,
+          undefined,
+          {} as any,
+        );
+        expect((noop as any).content[0].text).toBe("Card updated.");
+        const secondStateEntries = second.entries.filter(
+          (entry) => entry.customType === CARD_STATE_ENTRY_TYPE,
+        );
+        return (secondStateEntries.at(-1)?.data as any)?.state;
+      };
+      const restoredState = await readState();
+      expect(restoredState).toEqual({
+        pending: ["verify rebuild"],
+        findings: [{ topic: "schema", detail: "no caps allowed" }],
+      });
+      // Confirm a subsequent explicit update still wins over the restored state.
+      await restored!.execute(
+        "call-2",
+        {
+          pending: ["verify rebuild", "rerun smoke"],
+          findings: [{ topic: "schema", detail: "restored after restart" }],
+        },
+        undefined,
+        undefined,
+        {} as any,
+      );
+      const secondStateEntries = second.entries.filter(
+        (entry) => entry.customType === CARD_STATE_ENTRY_TYPE,
+      );
+      expect((secondStateEntries.at(-1)?.data as any)?.state).toEqual({
+        pending: ["verify rebuild", "rerun smoke"],
+        findings: [{ topic: "schema", detail: "restored after restart" }],
+      });
+    } finally {
+      if (previousEnv === undefined)
+        delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+      else process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = previousEnv;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("turn_end nudges once activity exceeds the threshold without update_card", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 11; index += 1) {
+      await extension.toolExecutionEnd({
+        toolName: "read",
+        isError: false,
+      });
+    }
+    await extension.turnEnd({
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+      stopReason: "stop",
+      timestamp: 9,
+    } as AgentMessage);
+    const nudges = extension.sentMessages.filter(
+      (entry) => entry.message.customType === CARD_NUDGE_MESSAGE_TYPE,
+    );
+    expect(nudges.length).toBe(1);
+    expect(nudges[0]?.options).toEqual({
+      deliverAs: "steer",
+      triggerTurn: true,
+    });
+  });
+
+  test("nudging stops after two consecutive misses rather than continuing forever", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature Y");
+    for (let cycle = 0; cycle < 4; cycle += 1) {
+      for (let index = 0; index < 11; index += 1) {
+        await extension.toolExecutionEnd({
+          toolName: "read",
+          isError: false,
+        });
+      }
+      await extension.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "still going" }],
+        stopReason: "stop",
+        timestamp: 10 + cycle,
+      } as AgentMessage);
+    }
+    const nudges = extension.sentMessages.filter(
+      (entry) => entry.message.customType === CARD_NUDGE_MESSAGE_TYPE,
+    );
+    expect(nudges.length).toBe(2);
+    const auditSkips = extension.entries.filter(
+      (entry) =>
+        entry.customType === TASK_STATE_AUDIT_ENTRY_TYPE &&
+        (entry.data as any)?.status === "skipped",
+    );
+    expect(auditSkips.length).toBeGreaterThan(0);
+  });
+
+  test("update_card pending/findings reach the rendered card every turn", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-card-pend-"));
+    const cardsDir = await mkdtemp(
+      path.join(tmpdir(), "context-card-pend-cards-"),
+    );
+    const previousEnv = process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+    process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = cardsDir;
+    try {
+      const extension = harness(cwd, { sessionId: "session-pend" });
+      await extension.start();
+      await extension.input("Implement the card feature");
+      await extension.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "Working on it." }],
+        stopReason: "stop",
+        timestamp: 2,
+      } as AgentMessage);
+      const tool = extension.tools.find((t) => t.name === "update_card");
+      expect(tool).toBeDefined();
+      if (!tool) throw new Error("update_card tool missing");
+      await tool.execute(
+        "call-1",
+        {
+          pending: ["verify rebuild", "rerun smoke"],
+          findings: [
+            { topic: "schema", detail: "no caps allowed" },
+            { topic: "scope", detail: "repo always present" },
+          ],
+        },
+        undefined,
+        undefined,
+        {} as any,
+      );
+
+      const output = await extension.project([
+        {
+          role: "user",
+          content: "Implement the card feature",
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Working on it." }],
+          stopReason: "stop",
+          timestamp: 2,
+        },
+      ] as AgentMessage[]);
+      const card = JSON.stringify(output?.messages[0]);
+      expect(card).toContain("what's pending: verify rebuild; rerun smoke");
+      expect(card).toContain(
+        "findings: schema: no caps allowed; scope: repo always present",
+      );
+    } finally {
+      if (previousEnv === undefined)
+        delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+      else process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = previousEnv;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("repo appears in the rendered card every turn, even before resuming a prior session", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-card-repo-"));
+    const cardsDir = await mkdtemp(
+      path.join(tmpdir(), "context-card-repo-cards-"),
+    );
+    const previousEnv = process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+    process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = cardsDir;
+    try {
+      const extension = harness(cwd, { sessionId: "session-repo" });
+      await extension.start();
+      await extension.input("Inspect the project");
+      const output = await extension.project([
+        { role: "user", content: "Inspect the project", timestamp: 1 },
+      ] as AgentMessage[]);
+      const card = JSON.stringify(output?.messages[0]);
+      expect(card).toMatch(/repo:\s+/);
+    } finally {
+      if (previousEnv === undefined)
+        delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+      else process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = previousEnv;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("filesRead reaches the rendered card as a flat line when present", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-card-files-"));
+    const cardsDir = await mkdtemp(
+      path.join(tmpdir(), "context-card-files-cards-"),
+    );
+    const previousEnv = process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+    process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = cardsDir;
+    try {
+      const extension = harness(cwd, { sessionId: "session-files" });
+      await extension.start();
+      await extension.input("Read src/a.ts");
+      const readId = "read-1";
+      await extension.turnEnd({
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: readId,
+            name: "read",
+            arguments: { path: "src/a.ts" },
+          },
+        ],
+        stopReason: "toolUse",
+        timestamp: 2,
+      } as unknown as AgentMessage);
+      await extension.toolExecutionEnd({
+        toolName: "read",
+        isError: false,
+        result: { content: [{ type: "text", text: "v1" }] },
+      });
+      await extension.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "read a.ts" }],
+        stopReason: "stop",
+        timestamp: 4,
+      } as AgentMessage);
+      const output = await extension.project([
+        { role: "user", content: "Read src/a.ts", timestamp: 1 },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: readId,
+              name: "read",
+              arguments: { path: "src/a.ts" },
+            },
+          ],
+          stopReason: "toolUse",
+          timestamp: 2,
+        },
+        {
+          role: "toolResult",
+          toolCallId: readId,
+          toolName: "read",
+          isError: false,
+          content: [{ type: "text", text: "v1" }],
+          timestamp: 3,
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "read a.ts" }],
+          stopReason: "stop",
+          timestamp: 4,
+        },
+      ] as AgentMessage[]);
+      const card = JSON.stringify(output?.messages[0]);
+      // The card should mention at least one file read with state field.
+      expect(card).toMatch(/files read: .+ \((active|consumed)\)/);
+    } finally {
+      if (previousEnv === undefined)
+        delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+      else process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = previousEnv;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(cardsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("rendered card omits empty fields entirely", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-card-empty-"));
+    const cardsDir = await mkdtemp(
+      path.join(tmpdir(), "context-card-empty-cards-"),
+    );
+    const previousEnv = process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;
+    process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR = cardsDir;
+    try {
+      const extension = harness(cwd, { sessionId: "session-empty" });
+      await extension.start();
+      await extension.input("Inspect the project");
+      const output = await extension.project([
+        { role: "user", content: "Inspect the project", timestamp: 1 },
+      ] as AgentMessage[]);
+      const card = JSON.stringify(output?.messages[0]);
+      expect(card).not.toContain("what happened:");
+      expect(card).not.toContain("what's pending:");
+      expect(card).not.toContain("findings:");
+      expect(card).not.toContain("files read:");
+      expect(card).not.toContain("failures:");
     } finally {
       if (previousEnv === undefined)
         delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;

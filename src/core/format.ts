@@ -1,21 +1,17 @@
 import { isPlanningRequest } from "./continuity";
 import type {
+  CardFinding,
   PlanPhaseFramingMode,
   PlanPhaseFramingState,
   PlanProjectionMode,
   PlanProjectionState,
+  RepositoryIdentity,
   RuntimeCard,
 } from "./types";
 
 export interface FormatContextCardOptions {
   planProjectionMode?: PlanProjectionMode;
   planPhaseFramingMode?: PlanPhaseFramingMode;
-}
-
-function addList(lines: string[], title: string, values: string[]): void {
-  if (values.length === 0) return;
-  lines.push(`${title}:`);
-  for (const value of values) lines.push(`- ${value}`);
 }
 
 function verifiedImplementation(card: RuntimeCard): boolean {
@@ -59,14 +55,69 @@ export function planPhaseFramingState(
     : "planning";
 }
 
+function formatChange(record: { action: string; count: number }): string {
+  return record.count > 1 ? `${record.action} ×${record.count}` : record.action;
+}
+
+function formatFailure(record: { action: string; detail?: string }): string {
+  return record.detail ? `${record.action} — ${record.detail}` : record.action;
+}
+
+function formatFinding(finding: CardFinding): string {
+  return `${finding.topic}: ${finding.detail}`;
+}
+
+function formatProject(card: RuntimeCard): string | undefined {
+  const description = card.capabilities.description?.trim();
+  if (description) return description;
+  if (card.capabilities.packageName && card.capabilities.projectType)
+    return `${card.capabilities.packageName} (${card.capabilities.projectType})`;
+  if (card.capabilities.packageName) return card.capabilities.packageName;
+  if (card.capabilities.projectType) return card.capabilities.projectType;
+  return undefined;
+}
+
+function formatRepo(repo: RepositoryIdentity): string {
+  const head = repo.head ? repo.head.slice(0, 8) : undefined;
+  return head ? `${repo.root} @ ${head}` : repo.root;
+}
+
+function projectCapabilitiesSection(card: RuntimeCard): string[] {
+  const rows: string[] = [];
+  const type = card.capabilities.projectType
+    ? `Type: ${card.capabilities.projectType}`
+    : "";
+  const pkg = card.capabilities.packageName
+    ? `Package: ${card.capabilities.packageName}${
+        card.capabilities.packageManager
+          ? ` (${card.capabilities.packageManager})`
+          : ""
+      }`
+    : "";
+  const docs = card.capabilities.documentation.length
+    ? `Documentation: ${card.capabilities.documentation.join(", ")}`
+    : "";
+  const validate = card.capabilities.validation.length
+    ? `Validation: ${card.capabilities.validation.join(", ")}`
+    : "";
+  for (const row of [type, pkg, docs, validate]) if (row) rows.push(row);
+  return rows;
+}
+
 export function formatContextCard(
   card: RuntimeCard,
   options: FormatContextCardOptions = {},
 ): string {
-  const lines = ["<context-card>", `TASK: ${card.goal || "(unset)"}`];
+  const lines = ["<context-card>"];
+  if (card.goal) lines.push(`goal: ${card.goal}`);
   if (card.taskId) lines.push(`TASK ID: ${card.taskId}`);
   if (card.latestRequest && card.latestRequest !== card.goal)
     lines.push(`LATEST REQUEST: ${card.latestRequest}`);
+
+  const project = formatProject(card);
+  if (project) lines.push(`project: ${project}`);
+  if (card.repo) lines.push(`repo: ${formatRepo(card.repo)}`);
+
   if (card.plan) {
     if (planProjectionState(card, options) === "retired")
       lines.push(
@@ -94,58 +145,57 @@ export function formatContextCard(
     }
   }
 
-  addList(
-    lines,
-    "PROJECT CAPABILITIES",
-    [
-      card.capabilities.projectType
-        ? `Type: ${card.capabilities.projectType}`
-        : "",
-      card.capabilities.packageName
-        ? `Package: ${card.capabilities.packageName}${card.capabilities.packageManager ? ` (${card.capabilities.packageManager})` : ""}`
-        : "",
-      card.capabilities.documentation.length
-        ? `Documentation: ${card.capabilities.documentation.join(", ")}`
-        : "",
-      card.capabilities.validation.length
-        ? `Validation: ${card.capabilities.validation.join(", ")}`
-        : "",
-    ].filter(Boolean),
-  );
+  const capabilityRows = projectCapabilitiesSection(card);
+  if (capabilityRows.length) {
+    lines.push(`PROJECT CAPABILITIES:`);
+    for (const row of capabilityRows) lines.push(`- ${row}`);
+  }
+
+  if (card.execution.changes.length) {
+    lines.push(
+      `what happened: ${card.execution.changes.map(formatChange).join("; ")}`,
+    );
+  }
+  if (card.pending && card.pending.length) {
+    lines.push(`what's pending: ${card.pending.join("; ")}`);
+  }
+  if (card.findings && card.findings.length) {
+    lines.push(`findings: ${card.findings.map(formatFinding).join("; ")}`);
+  }
+  if (card.filesRead && card.filesRead.length) {
+    lines.push(
+      `files read: ${card.filesRead
+        .map((entry) => `${entry.path} (${entry.state})`)
+        .join(", ")}`,
+    );
+  }
+  if (card.execution.failures.length) {
+    lines.push(
+      `failures: ${card.execution.failures.map(formatFailure).join("; ")}`,
+    );
+  }
+
   if (card.resumed) {
     if (card.resumed.repositoryChanged)
       lines.push(
         "REPOSITORY STATE CHANGED SINCE THE PRIOR SESSION; prior validations are historical.",
       );
-    addList(
-      lines,
-      "PRIOR SESSION UNRESOLVED FAILURES",
-      card.resumed.execution.failures.map((record) =>
-        record.detail ? `${record.action} — ${record.detail}` : record.action,
-      ),
-    );
-    addList(
-      lines,
-      "PRIOR SESSION VERIFIED FACTS",
-      card.resumed.execution.changes.map((record) =>
-        record.count > 1 ? `${record.action} ×${record.count}` : record.action,
-      ),
-    );
+    const priorFailures = card.resumed.execution.failures
+      .map(formatFailure)
+      .filter(Boolean);
+    if (priorFailures.length) {
+      lines.push(`PRIOR SESSION UNRESOLVED FAILURES:`);
+      for (const failure of priorFailures) lines.push(`- ${failure}`);
+    }
+    const priorChanges = card.resumed.execution.changes
+      .map(formatChange)
+      .filter(Boolean);
+    if (priorChanges.length) {
+      lines.push(`PRIOR SESSION VERIFIED FACTS:`);
+      for (const change of priorChanges) lines.push(`- ${change}`);
+    }
   }
-  addList(
-    lines,
-    "UNRESOLVED FAILURES",
-    card.execution.failures.map((record) =>
-      record.detail ? `${record.action} — ${record.detail}` : record.action,
-    ),
-  );
-  addList(
-    lines,
-    "VERIFIED CHANGES",
-    card.execution.changes.map((record) =>
-      record.count > 1 ? `${record.action} ×${record.count}` : record.action,
-    ),
-  );
+
   lines.push("</context-card>");
   return lines.join("\n");
 }

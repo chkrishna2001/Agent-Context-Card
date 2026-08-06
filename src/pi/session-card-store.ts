@@ -42,9 +42,16 @@ function git(cwd: string, args: string[]): string | undefined {
   }
 }
 
-export function repositoryProvenance(cwd: string): RepositoryProvenance {
+export function repositoryIdentity(cwd: string): {
+  root: string;
+  head?: string;
+} {
   const root = git(cwd, ["rev-parse", "--show-toplevel"]) ?? path.resolve(cwd);
-  const head = git(cwd, ["rev-parse", "HEAD"]);
+  return { root: path.resolve(root), head: git(cwd, ["rev-parse", "HEAD"]) };
+}
+
+export function repositoryProvenance(cwd: string): RepositoryProvenance {
+  const { root, head } = repositoryIdentity(cwd);
   const tracked =
     git(cwd, [
       "diff",
@@ -67,11 +74,7 @@ export function repositoryProvenance(cwd: string): RepositoryProvenance {
       worktreeHash.update("unreadable");
     }
   }
-  return {
-    root: path.resolve(root),
-    head,
-    worktree: worktreeHash.digest("hex"),
-  };
+  return { root, head, worktree: worktreeHash.digest("hex") };
 }
 
 /**

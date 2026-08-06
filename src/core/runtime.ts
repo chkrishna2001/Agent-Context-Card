@@ -1,7 +1,13 @@
 import { taskGoalFromInput } from "./anchor";
 import { buildExecutionJournal } from "./execution";
 import { buildProjectCapabilities } from "./project";
-import type { ContextMessage, RuntimeCard } from "./types";
+import type {
+  CardFinding,
+  ContextMessage,
+  EvidenceLease,
+  RepositoryIdentity,
+  RuntimeCard,
+} from "./types";
 
 type ContinuityState = Pick<RuntimeCard, "taskId" | "plan" | "resumed">;
 
@@ -10,6 +16,12 @@ export function buildRuntimeCard(
   goal: string,
   messages: ContextMessage[],
   continuity: ContinuityState = {},
+  extras: {
+    pending?: string[];
+    findings?: CardFinding[];
+    filesRead?: EvidenceLease[];
+    repo?: RepositoryIdentity;
+  } = {},
 ): RuntimeCard {
   const latestRequest = messages
     .filter((message) => message.role === "user")
@@ -21,6 +33,10 @@ export function buildRuntimeCard(
     latestRequest,
     capabilities: buildProjectCapabilities(cwd),
     execution: buildExecutionJournal(messages),
+    pending: extras.pending,
+    findings: extras.findings,
+    filesRead: extras.filesRead,
+    repo: extras.repo,
     ...continuity,
   };
 }

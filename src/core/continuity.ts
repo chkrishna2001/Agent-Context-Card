@@ -1,4 +1,6 @@
 import type {
+  CardFinding,
+  CardState,
   ExecutionJournal,
   ExecutionRecord,
   PinnedPlan,
@@ -236,6 +238,25 @@ function planCandidate(value: unknown): value is PlanCandidate {
   );
 }
 
+function cardFinding(value: unknown): value is CardFinding {
+  if (!value || typeof value !== "object") return false;
+  const finding = value as Partial<CardFinding>;
+  return (
+    typeof finding.topic === "string" && typeof finding.detail === "string"
+  );
+}
+
+function cardState(value: unknown): value is CardState {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<CardState>;
+  return (
+    Array.isArray(candidate.pending) &&
+    candidate.pending.every((entry) => typeof entry === "string") &&
+    Array.isArray(candidate.findings) &&
+    candidate.findings.every(cardFinding)
+  );
+}
+
 export function parseTaskSnapshot(value: unknown): TaskSnapshot | undefined {
   if (!value || typeof value !== "object") return undefined;
   const candidate = value as Partial<TaskSnapshot>;
@@ -250,7 +271,9 @@ export function parseTaskSnapshot(value: unknown): TaskSnapshot | undefined {
     !provenance(candidate.provenance) ||
     typeof candidate.updatedAt !== "string" ||
     (candidate.plan !== undefined && !plan(candidate.plan)) ||
-    (candidate.candidate !== undefined && !planCandidate(candidate.candidate))
+    (candidate.candidate !== undefined &&
+      !planCandidate(candidate.candidate)) ||
+    (candidate.cardState !== undefined && !cardState(candidate.cardState))
   )
     return undefined;
   return candidate as TaskSnapshot;

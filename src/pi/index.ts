@@ -4,6 +4,7 @@ import type {
   ExtensionContext,
   SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { createTaskAnchor, taskGoalFromInput } from "../core/anchor";
 import {
   extractPhaseLimitedDirectives,
@@ -27,11 +28,17 @@ import {
   ANCHOR_ENTRY_TYPE,
   AUDIT_ENTRY_TYPE,
   CARD_MESSAGE_TYPE,
+  CARD_NUDGE_MESSAGE_TYPE,
+  CARD_STATE_ENTRY_TYPE,
   emptyAnchor,
+  emptyCardState,
   emptyExecutionJournal,
   PLAN_ENTRY_TYPE,
   RESUME_ENTRY_TYPE,
   TASK_STATE_AUDIT_ENTRY_TYPE,
+  type CardState,
+  type CardStateDetails,
+  type EvidenceLease,
   type ExecutionJournal,
   type PinnedPlan,
   type PlanCandidate,
@@ -39,6 +46,7 @@ import {
   type PlanProjectionMode,
   type PlanStateDetails,
   type ProjectionAudit,
+  type RepositoryIdentity,
   type RepositoryProvenance,
   type ResumeStateDetails,
   type TaskAnchor,
@@ -51,7 +59,14 @@ import {
   normalizeMessages,
   scopeMessagesToGoal,
 } from "./normalize";
-import { repositoryProvenance, SessionCardStore } from "./session-card-store";
+import {
+  repositoryIdentity,
+  repositoryProvenance,
+  SessionCardStore,
+} from "./session-card-store";
+
+const CARD_ACTIVITY_NUDGE_THRESHOLD = 10;
+const CARD_NUDGE_STREAK_CAP = 2;
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value), 10);
@@ -81,6 +96,7 @@ function branchMessages(entries: SessionEntry[]): AgentMessage[] {
 export default function agentContextCard(pi: ExtensionAPI): void {
   let anchor: TaskAnchor = emptyAnchor();
   let currentTurn = 0;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let latestRequest = "";
   let previousTurnSettled = false;
   let lastCard = "";
@@ -92,6 +108,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let resumedProvenance: RepositoryProvenance | undefined;
   let planningTurn = false;
   let turnMutated = false;
+  let cardState: CardState = emptyCardState();
+  let cardActivitySinceUpdate = 0;
+  let cardNudgeStreak = 0;
   // Global by default; overridable so tests never touch the real user
   // profile directory.
   const sessionStore = new SessionCardStore(
@@ -120,6 +139,18 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       detail,
       timestamp: new Date().toISOString(),
     });
+
+  const persistCardState = (): void => {
+    pi.appendEntry<CardStateDetails>(CARD_STATE_ENTRY_TYPE, {
+      state: cardState,
+    });
+  };
+
+  const resetCardState = (): void => {
+    cardState = emptyCardState();
+    cardActivitySinceUpdate = 0;
+    cardNudgeStreak = 0;
+  };
 
   pi.registerFlag("context-card-recent-turns", {
     description: "Recent user turns retained verbatim (default: 2)",
@@ -163,6 +194,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     planCandidate = undefined;
     resumedExecution = emptyExecutionJournal();
     resumedProvenance = undefined;
+    cardState = emptyCardState();
+    cardActivitySinceUpdate = 0;
+    cardNudgeStreak = 0;
     for (const entry of branch) {
       if (entry.type !== "custom" || entry.customType !== ANCHOR_ENTRY_TYPE)
         continue;
@@ -183,6 +217,10 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         taskId = details.snapshot.taskId;
         resumedExecution = details.snapshot.execution;
         resumedProvenance = details.snapshot.provenance;
+      }
+      if (entry.customType === CARD_STATE_ENTRY_TYPE) {
+        const details = entry.data as CardStateDetails | undefined;
+        if (details?.state) cardState = details.state;
       }
     }
     const messages = branchMessages(branch);
@@ -222,7 +260,16 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       plan,
       candidate: planCandidate,
       execution: mergeExecutionJournals(resumedExecution, current),
-      provenance: repositoryProvenance(ctx.cwd),
+      provenance: resumedProvenance
+        ? repositoryProvenance(ctx.cwd)
+        : { ...repositoryIdentity(ctx.cwd), worktree: "unused" },
+      cardState: {
+        pending: [...cardState.pending],
+        findings: cardState.findings.map((finding) => ({
+          topic: finding.topic,
+          detail: finding.detail,
+        })),
+      },
       updatedAt: new Date().toISOString(),
     };
     try {
@@ -236,6 +283,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   const runtimeCard = (
     ctx: ExtensionContext,
     normalized: ReturnType<typeof normalizeMessages>,
+    hotEvidence: EvidenceLease[] = [],
   ) => {
     const currentExecution = buildExecutionJournal(normalized);
     const priorExecution = unresolvedPriorExecution(
@@ -244,23 +292,35 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     );
     const hasPriorExecution =
       priorExecution.changes.length > 0 || priorExecution.failures.length > 0;
-    const currentProvenance = resumedProvenance
-      ? repositoryProvenance(ctx.cwd)
+    const repoIdentity: RepositoryIdentity = repositoryIdentity(ctx.cwd);
+    const resumedProvenanceCheck = resumedProvenance
+      ? { resumedProvenance, currentProvenance: repositoryProvenance(ctx.cwd) }
       : undefined;
-    return buildRuntimeCard(ctx.cwd, anchor.goal, normalized, {
-      taskId,
-      plan,
-      resumed:
-        hasPriorExecution && resumedProvenance && currentProvenance
-          ? {
-              execution: priorExecution,
-              repositoryChanged: !sameRepositoryState(
-                resumedProvenance,
-                currentProvenance,
-              ),
-            }
-          : undefined,
-    });
+    return buildRuntimeCard(
+      ctx.cwd,
+      anchor.goal,
+      normalized,
+      {
+        taskId,
+        plan,
+        resumed:
+          hasPriorExecution && resumedProvenanceCheck
+            ? {
+                execution: priorExecution,
+                repositoryChanged: !sameRepositoryState(
+                  resumedProvenanceCheck.resumedProvenance,
+                  resumedProvenanceCheck.currentProvenance,
+                ),
+              }
+            : undefined,
+      },
+      {
+        pending: cardState.pending,
+        findings: cardState.findings,
+        filesRead: hotEvidence,
+        repo: repoIdentity,
+      },
+    );
   };
 
   const persistAnchor = (text: string, reset: boolean): boolean => {
@@ -286,12 +346,14 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       planCandidate = snapshot.candidate;
       resumedExecution = snapshot.execution;
       resumedProvenance = snapshot.provenance;
+      cardState = snapshot.cardState ?? emptyCardState();
       pi.appendEntry<ResumeStateDetails>(RESUME_ENTRY_TYPE, { snapshot });
       pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, {
         anchor,
         reset: true,
       });
       persistPlanState();
+      persistCardState();
       taskAudit(
         "load",
         "success",
@@ -354,6 +416,49 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   pi.on("tool_execution_end", (event) => {
     if (!event.isError && isMutationToolName(event.toolName))
       turnMutated = true;
+    if (event.isError) return;
+    const name = event.toolName.toLocaleLowerCase();
+    if (
+      name === "update_card" ||
+      name === "card" ||
+      name === "card_new" ||
+      name === "card_reset"
+    )
+      return;
+    if (name === "bash") {
+      const args =
+        event.result && typeof event.result === "object"
+          ? (event.result as { args?: Record<string, unknown> })
+          : undefined;
+      const command =
+        args?.args && typeof args.args.command === "string"
+          ? args.args.command
+          : "";
+      const looksReadOnly =
+        /\b(?:cat|less|more|head|tail|find|ls|grep|rg|wc|stat|file)\b/i.test(
+          command,
+        ) && !/&&|;|\|.*(?:>|tee)/i.test(command);
+      const looksDiscovery = /(?:^|\s)(?:find|ls|grep|rg|tree)\b/i.test(
+        command,
+      );
+      if (looksReadOnly || looksDiscovery) cardActivitySinceUpdate++;
+      return;
+    }
+    if (
+      [
+        "read",
+        "view_file",
+        "find",
+        "search",
+        "grep",
+        "glob",
+        "list",
+        "edit",
+        "write",
+        "apply_patch",
+      ].includes(name)
+    )
+      cardActivitySinceUpdate++;
   });
   pi.on("turn_end", async (event, ctx) => {
     previousTurnSettled =
@@ -375,6 +480,33 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     if (previousTurnSettled) {
       currentTurn++;
       await saveSessionCard(ctx);
+      // Threshold of 10 meaningful read/search/write tool calls since the last
+      // successful update_card balances silent context loss against nagging.
+      if (
+        cardActivitySinceUpdate > CARD_ACTIVITY_NUDGE_THRESHOLD &&
+        anchor.goal &&
+        cardNudgeStreak < CARD_NUDGE_STREAK_CAP
+      ) {
+        pi.sendMessage(
+          {
+            customType: CARD_NUDGE_MESSAGE_TYPE,
+            content:
+              "You have done meaningful work without updating the agent context card. Call update_card now (with any findings or pending items since the last update) or call it with the existing fields unchanged to confirm nothing new is worth recording. The card is the only memory that survives between turns.",
+            display: false,
+          },
+          { deliverAs: "steer", triggerTurn: true },
+        );
+        cardNudgeStreak++;
+      } else if (
+        cardActivitySinceUpdate > CARD_ACTIVITY_NUDGE_THRESHOLD &&
+        cardNudgeStreak >= CARD_NUDGE_STREAK_CAP
+      ) {
+        taskAudit(
+          "session",
+          "skipped",
+          `card update nudge cap reached (${CARD_NUDGE_STREAK_CAP}); activity=${cardActivitySinceUpdate}`,
+        );
+      }
     }
   });
   pi.on("session_shutdown", async (_event, ctx) => saveSessionCard(ctx));
@@ -400,7 +532,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       2,
     );
     const projection = projectContext(normalized, keepRecentTurns);
-    let card = runtimeCard(ctx, normalized);
+    let card = runtimeCard(ctx, normalized, projection.hotEvidence);
     const violations = checkCardInvariants(card);
     if (
       violations.some((v) => v.rule === "stale-plan-directive") &&
@@ -506,10 +638,14 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       const normalized = normalizeMessages(
         branchMessages(ctx.sessionManager.getBranch()),
       );
-      lastCard = formatContextCard(runtimeCard(ctx, normalized), {
-        planProjectionMode: planProjectionMode(),
-        planPhaseFramingMode: planPhaseFramingMode(),
-      });
+      const projection = projectContext(normalized, 2);
+      lastCard = formatContextCard(
+        runtimeCard(ctx, normalized, projection.hotEvidence),
+        {
+          planProjectionMode: planProjectionMode(),
+          planPhaseFramingMode: planPhaseFramingMode(),
+        },
+      );
       ctx.ui.notify(lastCard, "info");
     },
   });
@@ -519,6 +655,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       if (!persistAnchor(args, true))
         return ctx.ui.notify("Usage: /card-new <goal>", "warning");
       latestRequest = anchor.goal;
+      resetCardState();
       ctx.ui.notify(`Started new task: ${anchor.goal}`, "info");
     },
   });
@@ -539,6 +676,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       planCandidate = undefined;
       resumedExecution = emptyExecutionJournal();
       resumedProvenance = undefined;
+      resetCardState();
       pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, {
         anchor,
         reset: true,
@@ -556,6 +694,49 @@ export default function agentContextCard(pi: ExtensionAPI): void {
           : "No projection has run yet.",
         "info",
       );
+    },
+  });
+
+  pi.registerTool({
+    name: "update_card",
+    label: "Update agent context card",
+    description:
+      "This card is the only memory that survives between turns of this session - nothing else you write or read carries forward except what's in it. Update it when you learn, decide, or rule something out. Write only what your future self will actually need; omit what's obvious or already resolved. What you skip stating precisely, you lose. Each provided field fully replaces the current value; omit a field to leave it unchanged.",
+    parameters: Type.Object({
+      pending: Type.Optional(Type.Array(Type.String())),
+      findings: Type.Optional(
+        Type.Array(
+          Type.Object({
+            topic: Type.String(),
+            detail: Type.String(),
+          }),
+        ),
+      ),
+    }),
+    async execute(
+      _toolCallId: string,
+      params: {
+        pending?: string[];
+        findings?: { topic: string; detail: string }[];
+      },
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      _ctx: unknown,
+    ) {
+      if (Array.isArray(params.pending))
+        cardState.pending = [...params.pending];
+      if (Array.isArray(params.findings))
+        cardState.findings = params.findings.map((finding) => ({
+          topic: finding.topic,
+          detail: finding.detail,
+        }));
+      persistCardState();
+      cardActivitySinceUpdate = 0;
+      cardNudgeStreak = 0;
+      return {
+        content: [{ type: "text", text: "Card updated." }],
+        details: {},
+      };
     },
   });
 }

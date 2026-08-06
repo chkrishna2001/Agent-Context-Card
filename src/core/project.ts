@@ -27,6 +27,21 @@ function packageManager(cwd: string): string | undefined {
   return existsSync(join(cwd, "package.json")) ? "npm" : undefined;
 }
 
+function readmeDescription(cwd: string): string | undefined {
+  const path = join(cwd, "README.md");
+  if (!existsSync(path)) return undefined;
+  try {
+    const text = readFileSync(path, "utf8");
+    for (const line of text.split(/\r?\n/)) {
+      const cleaned = line.replace(/^#+\s*/, "").trim();
+      if (cleaned) return cleaned;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 export function buildProjectCapabilities(cwd: string): ProjectCapabilities {
   const packageJson = readJson(join(cwd, "package.json"));
   const manager = packageManager(cwd);
@@ -57,12 +72,17 @@ export function buildProjectCapabilities(cwd: string): ProjectCapabilities {
     existsSync(join(cwd, "manifest.json")) ||
     existsSync(join(cwd, "manifest.chrome.json")) ||
     existsSync(join(cwd, "manifest.firefox.json"));
+  const description =
+    (typeof packageJson?.description === "string" &&
+      packageJson.description.trim()) ||
+    readmeDescription(cwd);
 
   return {
     projectType: browserExtension ? "browser extension" : undefined,
     packageName:
       typeof packageJson?.name === "string" ? packageJson.name : undefined,
     packageManager: manager,
+    description,
     documentation,
     validation,
   };

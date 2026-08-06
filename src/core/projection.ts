@@ -54,6 +54,10 @@ function isMutation(call: ToolCall): boolean {
   ].includes(call.name);
 }
 
+function isUpdateCardCall(call: ToolCall): boolean {
+  return call.name === "update_card";
+}
+
 function filePath(args: Record<string, unknown>): string | undefined {
   for (const key of [
     "path",
@@ -210,6 +214,73 @@ function fingerprint(calls: ToolCall[]): string {
   );
 }
 
+// The most recent successful update_card round in `messages` defines a
+// checkpoint boundary. Returns its local slice-relative round index, or
+// undefined if none. A checkpoint round's tool calls must all be
+// update_card (with no discovery/read/mutation mixed in) so the boundary
+// is unambiguous and the round itself never collides with hot-evidence
+// logic. Failed update_card attempts do not establish a boundary.
+function checkpointRoundIndex<TRaw>(
+  messages: ContextMessage<TRaw>[],
+  results: Map<string, ContextMessage<TRaw>>,
+): number | undefined {
+  const allRounds = rounds(messages);
+  let checkpoint: number | undefined;
+  for (const round of allRounds) {
+    if (!round.calls.every(isUpdateCardCall)) continue;
+    if (!round.calls.every((call) => successful(call, results))) continue;
+    checkpoint = round.index;
+  }
+  return checkpoint;
+}
+
+// Splits a turn around the checkpoint so the prefix collapses the same
+// way as an old turn, while the suffix keeps the full current-turn logic.
+// projectTurn(current=true) hard-codes "messages[0] is the user turn
+// anchor" and unconditionally re-pushes it; the suffix starts at the
+// checkpoint round itself (an assistant message), so we prepend the
+// turn's real user message as a placeholder, shift suffixActive to the
+// new indices, then strip the placeholder back out so the prefix's own
+// output still owns the single canonical copy of the user message.
+function projectCheckpointedTurn<TRaw>(
+  messages: ContextMessage<TRaw>[],
+  activeRounds: Set<number>,
+): { projected: ContextMessage<TRaw>[]; checkpoint: number | undefined } {
+  const results = resultMap(messages);
+  const checkpoint = checkpointRoundIndex(messages, results);
+  if (checkpoint === undefined || checkpoint <= 1) {
+    return {
+      projected: projectTurn(messages, true, activeRounds),
+      checkpoint: undefined,
+    };
+  }
+
+  const prefix = messages.slice(0, checkpoint);
+  const suffix = messages.slice(checkpoint);
+
+  const prefixActive = new Set<number>();
+  for (const idx of activeRounds) {
+    if (idx < checkpoint) prefixActive.add(idx);
+  }
+
+  const projectedPrefix = projectTurn(prefix, false, prefixActive);
+  const realUser = prefix[0];
+  const suffixActive = new Set<number>();
+  for (const idx of activeRounds) {
+    if (idx >= checkpoint) suffixActive.add(idx - checkpoint + 1);
+  }
+  const projectedSuffix = projectTurn(
+    realUser ? [realUser, ...suffix] : suffix,
+    true,
+    suffixActive,
+  );
+  const suffixOutput = realUser ? projectedSuffix.slice(1) : projectedSuffix;
+  return {
+    projected: [...projectedPrefix, ...suffixOutput],
+    checkpoint,
+  };
+}
+
 function projectTurn<TRaw>(
   messages: ContextMessage<TRaw>[],
   current: boolean,
@@ -237,7 +308,6 @@ function projectTurn<TRaw>(
     if (!final?.toolCalls.length) return [user, final];
     return [user, ...messages.slice(finalAssistant)];
   }
-
   const currentTurnText =
     messages.filter((m) => m.role === "user").slice(-1)[0]?.text ?? null;
 
@@ -278,6 +348,7 @@ function projectTurn<TRaw>(
 function projectionDetails<TRaw>(
   original: ContextMessage<TRaw>[],
   projected: ContextMessage<TRaw>[],
+  checkpointIndex: number | undefined = undefined,
 ): { retired: RetirementCounts; hotEvidence: EvidenceLease[] } {
   const keptIds = new Set(
     projected.flatMap(
@@ -295,19 +366,36 @@ function projectionDetails<TRaw>(
     discovery: 0,
     staleRead: 0,
     completedTurn: 0,
+    checkpoint: 0,
   };
 
   for (const [index, message] of original.entries()) {
+    if (index < lastUser) continue;
     const calls = message.toolCalls;
-    if (!calls?.length || calls.some((call) => keptIds.has(call.id))) continue;
-    if (index < lastUser) {
-      retired.completedTurn++;
+    if (!calls?.length) continue;
+    if (calls.every(isUpdateCardCall)) continue;
+    if (calls.some((call) => keptIds.has(call.id))) continue;
+    if (checkedInSameRound(calls, keptFingerprints)) {
+      retired.duplicate++;
     } else if (calls.every(isDiscovery)) {
       retired.discovery++;
-    } else if (keptFingerprints.has(fingerprint(calls))) {
-      retired.duplicate++;
     } else if (calls.some(isRead)) {
-      retired.staleRead++;
+      // Reads not in the projected set: either stale (mutation happened
+      // with the grace boundary), kept under activeRounds, or collapsed
+      // by the checkpoint. Distinguish collapsed-by-checkpoint reads
+      // (everything before the checkpoint while warm-equipment reads
+      // were not in activeRounds) from explicit staleRead counts.
+      if (
+        checkpointIndex !== undefined &&
+        index < checkpointIndex &&
+        !isInActiveRounds(original, index)
+      ) {
+        retired.checkpoint++;
+      } else {
+        retired.staleRead++;
+      }
+    } else if (checkpointIndex !== undefined && index < checkpointIndex) {
+      retired.checkpoint++;
     } else {
       retired.completedTurn++;
     }
@@ -344,6 +432,31 @@ function projectionDetails<TRaw>(
   return { retired, hotEvidence: [...latestReads.values()] };
 }
 
+function checkedInSameRound(
+  calls: ToolCall[],
+  keptFingerprints: Set<string>,
+): boolean {
+  return keptFingerprints.has(fingerprint(calls));
+}
+
+function isInActiveRounds<TRaw>(
+  original: ContextMessage<TRaw>[],
+  index: number,
+): boolean {
+  const round = original[index];
+  if (!round?.toolCalls?.length) return false;
+  const path = filePath(round.toolCalls[0]!.arguments);
+  if (!path) return false;
+  for (let i = index + 1; i < original.length; i += 1) {
+    const candidate = original[i];
+    if (!candidate?.toolCalls?.length) continue;
+    for (const call of candidate.toolCalls) {
+      if (isRead(call) && filePath(call.arguments) === path) return true;
+    }
+  }
+  return false;
+}
+
 export function projectContext<TRaw>(
   messages: ContextMessage<TRaw>[],
   keepRecentTurns = 2,
@@ -367,6 +480,7 @@ export function projectContext<TRaw>(
         discovery: 0,
         staleRead: 0,
         completedTurn: 0,
+        checkpoint: 0,
       },
       hotEvidence: [],
     };
@@ -389,6 +503,7 @@ export function projectContext<TRaw>(
 
   const firstTurn = Math.max(0, starts.length - keepRecentTurns);
   const projected: ContextMessage<TRaw>[] = [];
+  let checkpointRoundIndexGlobal: number | undefined;
   for (let turn = firstTurn; turn < starts.length; turn++) {
     const start = starts[turn];
     if (start === undefined) continue;
@@ -402,13 +517,21 @@ export function projectContext<TRaw>(
       }
     }
 
-    projected.push(
-      ...projectTurn(
+    const isCurrent = turn === starts.length - 1;
+    if (isCurrent) {
+      const { projected: turnProjected, checkpoint } = projectCheckpointedTurn(
         messages.slice(start, end),
-        turn === starts.length - 1,
         turnActiveRounds,
-      ),
-    );
+      );
+      projected.push(...turnProjected);
+      if (checkpoint !== undefined) {
+        checkpointRoundIndexGlobal = start + checkpoint;
+      }
+    } else {
+      projected.push(
+        ...projectTurn(messages.slice(start, end), false, turnActiveRounds),
+      );
+    }
   }
 
   const originalChars = messages.reduce(
@@ -419,7 +542,11 @@ export function projectContext<TRaw>(
     (sum, message) => sum + (message.text?.length ?? 0),
     0,
   );
-  const details = projectionDetails(messages, projected);
+  const details = projectionDetails(
+    messages,
+    projected,
+    checkpointRoundIndexGlobal,
+  );
   return {
     messages: projected.map((message) => message.raw),
     retiredMessages: Math.max(0, messages.length - projected.length),

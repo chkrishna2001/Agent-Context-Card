@@ -1,8 +1,10 @@
 export const CARD_MESSAGE_TYPE = "agent-context-card";
+export const CARD_NUDGE_MESSAGE_TYPE = "agent-context-card-nudge";
 export const ANCHOR_ENTRY_TYPE = "agent-context-card-anchor";
 export const AUDIT_ENTRY_TYPE = "agent-context-card-audit";
 export const PLAN_ENTRY_TYPE = "agent-context-card-plan";
 export const RESUME_ENTRY_TYPE = "agent-context-card-resume";
+export const CARD_STATE_ENTRY_TYPE = "agent-context-card-state";
 export const TASK_STATE_AUDIT_ENTRY_TYPE =
   "agent-context-card-task-state-audit";
 
@@ -62,6 +64,7 @@ export interface ProjectCapabilities {
   projectType?: string;
   packageName?: string;
   packageManager?: string;
+  description?: string;
   documentation: string[];
   validation: string[];
 }
@@ -87,11 +90,34 @@ export interface RuntimeCard {
   latestRequest?: string;
   capabilities: ProjectCapabilities;
   execution: ExecutionJournal;
+  pending?: string[];
+  findings?: CardFinding[];
+  filesRead?: EvidenceLease[];
+  repo?: RepositoryIdentity;
   plan?: PinnedPlan;
   resumed?: {
     execution: ExecutionJournal;
     repositoryChanged: boolean;
   };
+}
+
+export interface CardFinding {
+  topic: string;
+  detail: string;
+}
+
+export interface CardState {
+  pending: string[];
+  findings: CardFinding[];
+}
+
+export const emptyCardState = (): CardState => ({
+  pending: [],
+  findings: [],
+});
+
+export interface CardStateDetails {
+  state: CardState;
 }
 
 export type PlanProjectionMode = "full" | "phase-aware";
@@ -106,6 +132,11 @@ export interface RepositoryProvenance {
   worktree: string;
 }
 
+export interface RepositoryIdentity {
+  root: string;
+  head?: string;
+}
+
 export interface TaskSnapshot {
   schemaVersion: 1;
   sessionId: string;
@@ -115,6 +146,7 @@ export interface TaskSnapshot {
   candidate?: PlanCandidate;
   execution: ExecutionJournal;
   provenance: RepositoryProvenance;
+  cardState?: CardState;
   updatedAt: string;
 }
 
@@ -142,6 +174,7 @@ export interface RetirementCounts {
   discovery: number;
   staleRead: number;
   completedTurn: number;
+  checkpoint: number;
 }
 
 export interface ProjectionResult<TRaw = unknown> {
