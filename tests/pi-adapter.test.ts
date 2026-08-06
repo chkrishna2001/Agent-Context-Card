@@ -96,6 +96,14 @@ function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
       for (const handler of handlers.get("turn_end") ?? [])
         await handler({ message, toolResults: [] }, context);
     },
+    async beforeProviderRequest(payload: unknown) {
+      let result: unknown;
+      for (const handler of handlers.get("before_provider_request") ?? []) {
+        const returned = await handler({ payload }, context);
+        if (returned !== undefined) result = returned;
+      }
+      return result;
+    },
     async project(messages: AgentMessage[]) {
       let output: { messages: AgentMessage[] } | undefined;
       for (const handler of handlers.get("context") ?? [])
@@ -533,6 +541,63 @@ describe("Pi adapter", () => {
       deliverAs: "steer",
       triggerTurn: true,
     });
+  });
+
+  test("before_provider_request returns a payload forcing update_card once activity exceeds the threshold", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 11; index += 1) {
+      await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    }
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [
+        { type: "function", function: { name: "update_card" } },
+        { type: "function", function: { name: "read" } },
+      ],
+    };
+    const result = await extension.beforeProviderRequest(payload);
+    expect(result).toBeDefined();
+    expect((result as any).tool_choice).toEqual({
+      type: "function",
+      function: { name: "update_card" },
+    });
+  });
+
+  test("before_provider_request does not force tool_choice below the activity threshold", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const result = await extension.beforeProviderRequest(payload);
+    expect(result).toBeUndefined();
+  });
+
+  test("before_provider_request stops forcing after its own cap, independent of the nudge streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 11; index += 1) {
+      await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    }
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const first = await extension.beforeProviderRequest(payload);
+    const second = await extension.beforeProviderRequest(payload);
+    const third = await extension.beforeProviderRequest(payload);
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(third).toBeUndefined();
   });
 
   test("nudging stops after two consecutive misses rather than continuing forever", async () => {

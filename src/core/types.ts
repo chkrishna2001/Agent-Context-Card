@@ -151,7 +151,7 @@ export interface TaskSnapshot {
 }
 
 export interface TaskStateAudit {
-  operation: "load" | "save" | "close" | "gc" | "session" | "resume-check";
+  operation: "load" | "save" | "close" | "gc" | "session" | "resume-check" | "forcing";
   status: "success" | "missing" | "corrupt" | "failed" | "info" | "skipped";
   taskId?: string;
   detail?: string;

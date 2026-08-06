@@ -64,6 +64,7 @@ import {
   repositoryProvenance,
   SessionCardStore,
 } from "./session-card-store";
+import { tryForceUpdateCardToolCall } from "./before_provider_request";
 
 const CARD_ACTIVITY_NUDGE_THRESHOLD = 10;
 const CARD_NUDGE_STREAK_CAP = 2;
@@ -111,6 +112,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let cardState: CardState = emptyCardState();
   let cardActivitySinceUpdate = 0;
   let cardNudgeStreak = 0;
+  let forceNudgeStreak = 0;
   // Global by default; overridable so tests never touch the real user
   // profile directory.
   const sessionStore = new SessionCardStore(
@@ -150,6 +152,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     cardState = emptyCardState();
     cardActivitySinceUpdate = 0;
     cardNudgeStreak = 0;
+    forceNudgeStreak = 0;
   };
 
   pi.registerFlag("context-card-recent-turns", {
@@ -733,10 +736,57 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       persistCardState();
       cardActivitySinceUpdate = 0;
       cardNudgeStreak = 0;
+      forceNudgeStreak = 0;
       return {
         content: [{ type: "text", text: "Card updated." }],
         details: {},
       };
     },
   });
-}
+
+  pi.on("before_provider_request", (event, _ctx) => {
+    const payload = event.payload;
+    if (payload === undefined || payload === null || typeof payload !== "object") {
+      return undefined;
+    }
+    const payloadWithOrder = payload as Record<string, unknown>;
+    const messages = payloadWithOrder.messages;
+    const tools = payloadWithOrder.tools;
+    if (!Array.isArray(messages)) {
+      return undefined;
+    }
+    if (!Array.isArray(tools)) {
+      return undefined;
+    }
+    const hasUpdateCard = tools.some(
+      (tool): tool is { function: { name: string } } =>
+        tool !== null &&
+        typeof tool === "object" &&
+        "function" in tool &&
+        typeof tool.function === "object" &&
+        tool.function.name === "update_card",
+    );
+    if (!hasUpdateCard) {
+      return undefined;
+    }
+    if (payloadWithOrder.tool_choice !== undefined) {
+      return undefined;
+    }
+    if (
+      cardActivitySinceUpdate > CARD_ACTIVITY_NUDGE_THRESHOLD &&
+      forceNudgeStreak < CARD_NUDGE_STREAK_CAP
+    ) {
+      const forcedPayload = tryForceUpdateCardToolCall(payload);
+      if (forcedPayload !== undefined) {
+        forceNudgeStreak++;
+        taskAudit(
+          "forcing",
+          "info",
+          `card update forced via tool_choice; activity=${cardActivitySinceUpdate}; streak=${forceNudgeStreak}`,
+        );
+        return forcedPayload;
+      }
+    }
+    return undefined;
+  });
+};
