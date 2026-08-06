@@ -9,7 +9,11 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import agentContextCard from "../index";
-import { AUDIT_ENTRY_TYPE, CARD_MESSAGE_TYPE } from "../src/core/types";
+import {
+  ANCHOR_ENTRY_TYPE,
+  AUDIT_ENTRY_TYPE,
+  CARD_MESSAGE_TYPE,
+} from "../src/core/types";
 import { scopeMessagesToGoal } from "../src/pi/normalize";
 
 type Handler = (...args: any[]) => any;
@@ -216,6 +220,58 @@ describe("Pi adapter", () => {
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
+  });
+
+  test("a short affirmative reply does not reset the task anchor", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input(
+      "how do we maintain tools from users if the tool is a cli tool?",
+    );
+    await extension.turnEnd({
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: "Your options: 1. Agent-side proxy (recommended) - the sidecar pattern.",
+        },
+      ],
+      stopReason: "stop",
+      timestamp: 2,
+    } as AgentMessage);
+    const anchorEntriesBefore = extension.entries.filter(
+      (entry) => entry.customType === ANCHOR_ENTRY_TYPE,
+    ).length;
+
+    await extension.input("yes proceed with option 1");
+
+    const anchorEntriesAfter = extension.entries.filter(
+      (entry) => entry.customType === ANCHOR_ENTRY_TYPE,
+    );
+    expect(anchorEntriesAfter.length).toBe(anchorEntriesBefore);
+    const output = await extension.project([
+      {
+        role: "user",
+        content:
+          "how do we maintain tools from users if the tool is a cli tool?",
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Your options: 1. Agent-side proxy (recommended) - the sidecar pattern.",
+          },
+        ],
+        stopReason: "stop",
+        timestamp: 2,
+      },
+      { role: "user", content: "yes proceed with option 1", timestamp: 3 },
+    ] as AgentMessage[]);
+    expect(JSON.stringify(output?.messages)).toContain(
+      "how do we maintain tools",
+    );
   });
 
   test("resumes the pinned plan across a process restart on the same session ID", async () => {

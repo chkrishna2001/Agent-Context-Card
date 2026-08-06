@@ -148,6 +148,89 @@ describe("projection overlap", () => {
     expect(hasGrep).toBe(true);
   });
 
+  test("a large pasted current-turn blob does not blanket-protect incidental overlap", () => {
+    // Mirrors a real incident: a user pastes an entire prior assistant
+    // response back in to recover lost context. That blob mentions dozens
+    // of distinct terms (here "sidecar" among them), so a naive "does the
+    // current turn share any word with this call" check would protect
+    // nearly every earlier round from retirement, not just the ones the
+    // user is actually asking about.
+    const distinctFillerTerms = Array.from(
+      { length: 45 },
+      (_, i) => `topic${i}`,
+    ).join(" ");
+    const largeBlob = `Here is the plan again: sidecar pattern, endpoints, auth, retries. ${distinctFillerTerms}`;
+
+    const messages: ContextMessage<string>[] = [
+      ...baseMessages.map((m) =>
+        m.raw === "Asst: reading main.ts"
+          ? {
+              ...m,
+              toolCalls: [
+                {
+                  id: "1",
+                  name: "read",
+                  arguments: { path: "src/main.ts", topic: "sidecar" },
+                },
+              ],
+            }
+          : m,
+      ),
+      {
+        raw: "Asst: writing main.ts",
+        role: "assistant",
+        text: "Writing main.ts",
+        toolCalls: [
+          {
+            id: "2",
+            name: "write",
+            arguments: { path: "src/main.ts", content: "new content" },
+          },
+        ],
+      },
+      {
+        raw: "Tool: ok",
+        role: "toolResult",
+        text: "ok",
+        toolCalls: [],
+        toolResult: { callId: "2", toolName: "write", isError: false },
+      },
+      {
+        raw: "Asst: reading other.ts",
+        role: "assistant",
+        text: "Reading other.ts",
+        toolCalls: [{ id: "3", name: "read", arguments: { path: "other.ts" } }],
+      },
+      {
+        raw: "Tool: other content",
+        role: "toolResult",
+        text: "other content",
+        toolCalls: [],
+        toolResult: { callId: "3", toolName: "read", isError: false },
+      },
+      {
+        raw: "Asst: Done",
+        role: "assistant",
+        text: "Done",
+        toolCalls: [],
+      },
+      {
+        raw: "User: large blob",
+        role: "user",
+        text: largeBlob,
+        toolCalls: [],
+      },
+    ];
+
+    expect(largeBlob).not.toContain("src/main.ts");
+
+    const projectedResult = projectContext(messages);
+    const hasMainRead = projectedResult.messages.some(
+      (m) => m && m.includes("Asst: reading main.ts"),
+    );
+    expect(hasMainRead).toBe(false);
+  });
+
   test("existing retirement behavior is unchanged without overlap", () => {
     const messages: ContextMessage<string>[] = [
       ...baseMessages,

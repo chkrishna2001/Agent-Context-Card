@@ -4,11 +4,7 @@ import type {
   ExtensionContext,
   SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import {
-  createTaskAnchor,
-  taskBoundaryForInput,
-  taskGoalFromInput,
-} from "../core/anchor";
+import { createTaskAnchor, taskGoalFromInput } from "../core/anchor";
 import {
   extractPhaseLimitedDirectives,
   isPlanningRequest,
@@ -346,20 +342,8 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       persistPlanState();
     }
 
-    const boundary = taskBoundaryForInput(event.text, {
-      goal: anchor.goal,
-      latestRequest,
-      settled: previousTurnSettled,
-    });
-    if (!anchor.goal || boundary === "new") {
-      if (boundary === "new" && anchor.goal) {
-        plan = undefined;
-        planCandidate = undefined;
-        resumedExecution = emptyExecutionJournal();
-        resumedProvenance = undefined;
-        taskId = requestedId;
-        persistPlanState();
-      } else if (!taskId) {
+    if (!anchor.goal) {
+      if (!taskId) {
         taskId = requestedId;
       }
       persistAnchor(event.text, true);

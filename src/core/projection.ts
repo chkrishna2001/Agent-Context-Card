@@ -93,6 +93,12 @@ function successful<TRaw>(
   return Boolean(result?.toolResult && !result.toolResult.isError);
 }
 
+// Above this many distinct terms, the current-turn text is no longer a
+// focused reference to specific evidence (e.g. a whole prior response
+// pasted back in) and generic term overlap stops being a meaningful signal
+// of relevance — nearly everything shares a token with a large enough blob.
+const MAX_RELEVANCE_TERMS = 40;
+
 function hasReferenceOverlap<TRaw>(
   round: Round<TRaw>,
   userText: string,
@@ -104,6 +110,8 @@ function hasReferenceOverlap<TRaw>(
     const path = filePath(call.arguments);
     if (path && userText.toLowerCase().includes(path.toLowerCase()))
       return true;
+
+    if (userTerms.size > MAX_RELEVANCE_TERMS) continue;
 
     const callText = [command(call), JSON.stringify(call.arguments)].join(" ");
     const callTerms = terms(callText);

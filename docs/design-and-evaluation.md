@@ -92,14 +92,14 @@ The project does not describe its behavior as conversation compaction. It extrac
 5. **No arbitrary size target.** Minimal means justified by the task.
 6. **Preserve valid tool pairs.** A retained tool call keeps its matching result.
 7. **Failures remain until resolved.** A matching later success clears the failure.
-8. **Task boundaries outrank conversation age.** Unrelated work does not inherit the old task.
+8. **An explicit task switch outranks conversation age.** A `/card-new` or `/card-reset` starts clean; nothing else does — same-session task-switch inference proved unreliable in practice and was removed.
 9. **Measure provider usage.** Card length alone does not prove savings.
 
 ## Current projection model
 
 ### Task anchors
 
-The first substantive request creates an anchor. Follow-ups continue it while work is unsettled or continuation signals are present. Explicit unrelated-task language, or a settled and unrelated request, creates a new anchor.
+One Pi session is one task anchor. The first substantive request creates it, and it holds for the life of the session; there is no heuristic that infers a topic switch mid-session and auto-resets it. A prior version tried to infer "unrelated" follow-ups from text (a continuation-word regex plus a vocabulary-overlap fallback); it produced two documented false positives in real sessions — one erased a promoted plan on an exact task-ID match, the other silently truncated context after a plain "yes, proceed" reply — so it was removed in favor of explicit resets only, via `/card-new` or `/card-reset`.
 
 Anchors are stored as Pi custom session entries so resume and tree reconstruction can recover task identity without placing that metadata in model context.
 
@@ -231,7 +231,7 @@ Observed behavior:
 
 - turn 1 retired three consumed discovery rounds while keeping three hot file reads;
 - turns 2 and 3 retired completed-turn execution history;
-- turn 4 created a new task boundary and excluded the previous task;
+- turn 4 created a new task boundary and excluded the previous task (this ran under the since-removed same-session boundary heuristic; a rerun today would need an explicit `/card-new` at turn 4 to reproduce the exclusion);
 - no source file was read more than once;
 - no card-maintenance or archive tools were available.
 

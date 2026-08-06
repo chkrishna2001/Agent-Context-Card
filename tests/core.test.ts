@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { taskBoundaryForInput } from "../src/core/anchor";
 import { buildExecutionJournal } from "../src/core/execution";
 import {
   formatContextCard,
@@ -324,25 +323,4 @@ describe("card extraction", () => {
     expect(card).toContain("PRIOR SESSION VERIFIED FACTS");
     expect(card).toContain("REPOSITORY STATE CHANGED");
   });
-});
-
-test("task boundaries favor continuation while work is unsettled", () => {
-  expect(
-    taskBoundaryForInput("Implement JIRA-789 now", {
-      goal: "Create a plan for JIRA-789",
-      settled: true,
-    }),
-  ).toBe("continue");
-  expect(
-    taskBoundaryForInput("document it too", {
-      goal: "fix export",
-      settled: false,
-    }),
-  ).toBe("continue");
-  expect(
-    taskBoundaryForInput("new unrelated task: add auth", {
-      goal: "fix export",
-      settled: false,
-    }),
-  ).toBe("new");
 });

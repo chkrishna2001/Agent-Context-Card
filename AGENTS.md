@@ -70,9 +70,7 @@ The core is deterministic and platform-neutral.
 
 ### Task anchors
 
-The first substantive request creates a task anchor. Follow-ups continue it while work is unsettled or continuation signals are present. Explicit unrelated-task language, or a settled unrelated request, creates a new anchor.
-
-An unrelated task must not receive the preceding task's context.
+One Pi session is one task. The first substantive request creates the task anchor, and it persists for the life of the session — there is no automatic mid-session detection of an "unrelated" follow-up. The anchor is only ever replaced by an explicit `/card-new` (start a new task) or `/card-reset` (clear the card, keep the stored snapshot).
 
 ### Completed turns
 
@@ -311,10 +309,17 @@ machine-readable source.
 
 Local lifecycle expansion found a same-session boundary bug: after a settled
 planning turn, “Implement JIRA-789” was treated as a new task even though the
-exact task ID matched, erasing the promoted plan. Matching exact IDs now force
-continuation unless explicit unrelated-task language is present. Regression
-coverage includes interrupted planning, ten completed turns, and rewind/tree
-reconstruction.
+exact task ID matched, erasing the promoted plan. The fix at the time was to
+force continuation on an exact task-ID match. A second, less avoidable false
+positive later surfaced in production — a plain affirmative reply ("yes
+proceed with option 1") was classified as an unrelated task because it shared
+no vocabulary with the original goal text, silently truncating the model's
+context mid-session. Rather than keep patching the underlying text heuristic,
+same-session task-switch inference was removed entirely: one Pi session now
+maps to exactly one task anchor, created once from the first request and
+never auto-reset. Explicit resets remain available via `/card-new` and
+`/card-reset`. Regression coverage includes interrupted planning, ten
+completed turns, rewind/tree reconstruction, and the affirmative-reply case.
 
 ## Ten-session mixed proof
 
