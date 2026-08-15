@@ -71,6 +71,39 @@ function filePath(args: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+// A bash call whose entire job is dumping one file's raw content is
+// functionally the same event as calling the dedicated read tool - the
+// evidence lifecycle shouldn't be blind to it just because a model reached
+// for `cat` instead. Deliberately narrow and conservative: only the
+// commands that emit (all or a contiguous slice of) exactly one file's
+// content qualify, never piped/chained/redirected commands (those may be
+// filtering, searching, or writing elsewhere - not delivering the file
+// itself), and the extracted path must look path-like, not a bare flag
+// value (e.g. the "50" in "head -n 50 file.ts"). Ambiguous cases (multiple
+// files, unrecognized flags) fall through to undefined rather than guess.
+function bashReadPath(call: ToolCall): string | undefined {
+  if (!["bash", "shell", "shell_command"].includes(call.name)) return undefined;
+  const cmd = command(call).trim();
+  if (!cmd || /&&|;|\||>/.test(cmd)) return undefined;
+  if (!/^(?:cat|head|tail|less|more)\b/i.test(cmd)) return undefined;
+  const tokens = cmd.split(/\s+/).slice(1);
+  const last = tokens[tokens.length - 1];
+  if (!last || last.startsWith("-") || !/[./\\]/.test(last)) return undefined;
+  return last;
+}
+
+// Unifies the structured-argument read tools with bash-based full-file
+// reads into one "what path, if any, did this call deliver the content
+// of" lookup, so every consumer of read evidence sees both uniformly.
+function readPath(call: ToolCall): string | undefined {
+  if (isRead(call)) return filePath(call.arguments);
+  return bashReadPath(call);
+}
+
+function isReadLike(call: ToolCall): boolean {
+  return isRead(call) || bashReadPath(call) !== undefined;
+}
+
 function resultMap<TRaw>(
   messages: ContextMessage<TRaw>[],
 ): Map<string, ContextMessage<TRaw>> {
@@ -111,7 +144,7 @@ function hasReferenceOverlap<TRaw>(
   if (userTerms.size === 0) return false;
 
   for (const call of round.calls) {
-    const path = filePath(call.arguments);
+    const path = filePath(call.arguments) ?? bashReadPath(call);
     if (path && userText.toLowerCase().includes(path.toLowerCase()))
       return true;
 
@@ -154,7 +187,7 @@ function consumedDiscovery<TRaw>(
       .trim();
     if (
       hasLater(round.index, isMutation) ||
-      (round.calls.every(isListing) && hasLater(round.index, isRead)) ||
+      (round.calls.every(isListing) && hasLater(round.index, isReadLike)) ||
       ((!output || output === "(no output)") &&
         allRounds.some((candidate) => candidate.index > round.index))
     ) {
@@ -177,7 +210,7 @@ function consumedReads<TRaw>(
 
   for (const round of allRounds) {
     const reads = round.calls
-      .filter(isRead)
+      .filter(isReadLike)
       .filter((call) => successful(call, results));
     if (!reads.length) continue;
     const mutation = allRounds.find(
@@ -187,9 +220,7 @@ function consumedReads<TRaw>(
           (call) =>
             isMutation(call) &&
             successful(call, results) &&
-            reads.some(
-              (read) => filePath(read.arguments) === filePath(call.arguments),
-            ),
+            reads.some((read) => readPath(read) === filePath(call.arguments)),
         ),
     );
     if (!mutation) continue;
@@ -236,7 +267,7 @@ function consumedByFinding<TRaw>(
 
   for (const round of allRounds) {
     const reads = round.calls
-      .filter(isRead)
+      .filter(isReadLike)
       .filter((call) => successful(call, results));
     if (!reads.length) continue;
     const citation = allRounds.find(
@@ -246,7 +277,7 @@ function consumedByFinding<TRaw>(
           (call) =>
             successful(call, results) &&
             findingSources(call).some((path) =>
-              reads.some((read) => filePath(read.arguments) === path),
+              reads.some((read) => readPath(read) === path),
             ),
         ),
     );
@@ -311,7 +342,7 @@ function consumedByDisuse<TRaw>(
 
   for (const round of allRounds) {
     const reads = round.calls
-      .filter(isRead)
+      .filter(isReadLike)
       .filter((call) => successful(call, results));
     if (!reads.length) continue;
     // Mirrors the graceObserved check in consumedReads/consumedByFinding: a
@@ -324,7 +355,7 @@ function consumedByDisuse<TRaw>(
     );
     if (!graceObserved) continue;
     const stillEngaged = reads.some((read) => {
-      const path = filePath(read.arguments);
+      const path = readPath(read);
       return !path || referencedAfter(messages, round.index, path);
     });
     if (stillEngaged) continue;
@@ -530,7 +561,7 @@ function projectionDetails<TRaw>(
       retired.duplicate++;
     } else if (calls.every(isDiscovery)) {
       retired.discovery++;
-    } else if (calls.some(isRead)) {
+    } else if (calls.some(isReadLike)) {
       // Reads not in the projected set: cited by a later finding, never
       // referenced again by anything, stale (mutation happened with the
       // grace boundary), kept under activeRounds, or collapsed by the
@@ -565,8 +596,8 @@ function projectionDetails<TRaw>(
   );
   const latestReads = new Map<string, EvidenceLease>();
   for (const { call, index } of calls) {
-    if (!isRead(call)) continue;
-    const path = filePath(call.arguments);
+    if (!isReadLike(call)) continue;
+    const path = readPath(call);
     const result = results.get(call.id);
     if (!path || !result || result.toolResult?.isError) continue;
     const consumed = calls.some(
@@ -603,13 +634,13 @@ function isInActiveRounds<TRaw>(
 ): boolean {
   const round = original[index];
   if (!round?.toolCalls?.length) return false;
-  const path = filePath(round.toolCalls[0]!.arguments);
+  const path = readPath(round.toolCalls[0]!);
   if (!path) return false;
   for (let i = index + 1; i < original.length; i += 1) {
     const candidate = original[i];
     if (!candidate?.toolCalls?.length) continue;
     for (const call of candidate.toolCalls) {
-      if (isRead(call) && filePath(call.arguments) === path) return true;
+      if (isReadLike(call) && readPath(call) === path) return true;
     }
   }
   return false;

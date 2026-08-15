@@ -902,6 +902,182 @@ describe("disuse retirement", () => {
   });
 });
 
+describe("reads via bash", () => {
+  const tool = (
+    id: string,
+    name: string,
+    arguments_: Record<string, unknown>,
+  ): ToolCall => ({ id, name, arguments: arguments_ });
+  const assistant = (
+    id: string,
+    calls: ToolCall[],
+  ): ContextMessage<string> => ({
+    raw: "assistant:" + id,
+    toolOnlyRaw: "tools:" + id,
+    role: "assistant",
+    text: "assistant:" + id,
+    toolCalls: calls,
+  });
+  const resultFor = (call: ToolCall, text = "ok"): ContextMessage<string> => ({
+    raw: "result:" + call.id,
+    role: "toolResult",
+    text,
+    toolCalls: [],
+    toolResult: { callId: call.id, toolName: call.name, isError: false },
+  });
+  const user = (text: string): ContextMessage<string> => ({
+    raw: "user:" + text,
+    role: "user",
+    text,
+    toolCalls: [],
+  });
+
+  test("a bash cat of a file is treated as a read: consumed by a later mutation", () => {
+    const catA = tool("1", "bash", { command: "cat src/a.ts" });
+    const editA = tool("2", "edit", { path: "src/a.ts" });
+    const validate = tool("3", "bash", { command: "cat src/other.ts" });
+
+    const messages: ContextMessage<string>[] = [
+      user("Continue"),
+      assistant("cat-a", [catA]),
+      resultFor(catA, "a-contents"),
+      assistant("edit-a", [editA]),
+      resultFor(editA, "ok"),
+      assistant("validate", [validate]),
+      resultFor(validate, "other-contents"),
+    ];
+
+    const projected = projectContext(messages);
+    const texts = projected.messages.map((m) => String(m));
+    // Same outcome as a dedicated read tool call would get: the mutation
+    // supersedes it, with the usual grace round observed.
+    expect(texts.some((t) => t === "tools:cat-a")).toBe(false);
+    expect(projected.retired.staleRead).toBeGreaterThanOrEqual(1);
+    const aLease = projected.hotEvidence.find((e) => e.path === "src/a.ts");
+    expect(aLease).toBeUndefined();
+  });
+
+  test("a bash cat of a file cited by a later finding retires, same as a dedicated read", () => {
+    const catA = tool("1", "bash", { command: "cat src/a.ts" });
+    const catB = tool("2", "bash", { command: "cat src/b.ts" });
+    const cite = tool("3", "update_card", {
+      findings: [
+        { topic: "a.ts", detail: "exports foo()", sources: ["src/a.ts"] },
+      ],
+    });
+    const grace = tool("4", "bash", { command: "cat src/b.ts" });
+    const finalCheckpoint = tool("5", "update_card", { pending: ["done"] });
+
+    // Mirrors the "finding-sourced retirement" fixture shape: a second,
+    // later update_card so the citation and its read land together in the
+    // same projection pass instead of being split apart by the checkpoint
+    // boundary (a single-round prefix otherwise survives unconditionally
+    // via the old-turn "keep the final round" fallback, independent of
+    // whether it should retire - see this session's earlier debugging).
+    const messages: ContextMessage<string>[] = [
+      user("Continue"),
+      assistant("cat-a", [catA]),
+      resultFor(catA, "a-contents"),
+      assistant("cat-b", [catB]),
+      resultFor(catB, "b-contents"),
+      assistant("cite", [cite]),
+      resultFor(cite, "Card updated."),
+      assistant("grace", [grace]),
+      resultFor(grace, "b-contents-again"),
+      assistant("checkpoint", [finalCheckpoint]),
+      resultFor(finalCheckpoint, "Card updated."),
+    ];
+
+    const projected = projectContext(messages);
+    const texts = projected.messages.map((m) => String(m));
+    expect(texts.some((t) => t === "tools:cat-a")).toBe(false);
+    expect(projected.retired.findingConsumed).toBeGreaterThanOrEqual(1);
+  });
+
+  test("a bash cat nothing ever comes back to retires by disuse, same as a dedicated read", () => {
+    const catX = tool("1", "bash", { command: "cat src/x.ts" });
+    const catY = tool("2", "bash", { command: "cat src/y.ts" });
+    // A different command than catY's (not "cat" again) so this is a
+    // genuine second reference, not a literal duplicate round that would
+    // collapse into catY via fingerprint dedup instead of exercising
+    // disuse's "referenced again" check.
+    const mentionY = tool("3", "bash", { command: "less src/y.ts" });
+
+    const messages: ContextMessage<string>[] = [
+      user("Investigate"),
+      assistant("cat-x", [catX]),
+      resultFor(catX, "x-contents"),
+      assistant("cat-y", [catY]),
+      resultFor(catY, "y-contents"),
+      assistant("mention-y", [mentionY]),
+      resultFor(mentionY, "y-contents-again"),
+    ];
+
+    const projected = projectContext(messages);
+    const texts = projected.messages.map((m) => String(m));
+    // src/x.ts is never touched again; src/y.ts is re-cat'd, so it's
+    // engaged with again and stays.
+    expect(texts.some((t) => t === "tools:cat-x")).toBe(false);
+    expect(texts.some((t) => t === "tools:cat-y")).toBe(true);
+    expect(projected.retired.disused).toBeGreaterThanOrEqual(1);
+  });
+
+  test("a piped or chained bash command is not attributed as a read of the file it names", () => {
+    const piped = tool("1", "bash", { command: "cat src/a.ts | grep foo" });
+    const chained = tool("2", "bash", { command: "cat src/a.ts && echo done" });
+    const redirected = tool("3", "bash", { command: "cat src/a.ts > out.txt" });
+
+    for (const call of [piped, chained, redirected]) {
+      const messages: ContextMessage<string>[] = [
+        user("Continue"),
+        assistant("ambiguous", [call]),
+        resultFor(call, "some output"),
+        assistant("noise", [tool("9", "bash", { command: "cat src/b.ts" })]),
+        resultFor(tool("9", "bash", { command: "cat src/b.ts" }), "b"),
+      ];
+      const projected = projectContext(messages);
+      // Never classified as a read at all, so it can't appear in
+      // hotEvidence for src/a.ts under any state - it was never tracked,
+      // not "kept".
+      const aLease = projected.hotEvidence.find((e) => e.path === "src/a.ts");
+      expect(aLease).toBeUndefined();
+    }
+  });
+
+  test("a flagged bash read (head -n 50 file) extracts the file, not the flag's value", () => {
+    const headA = tool("1", "bash", { command: "head -n 50 src/a.ts" });
+    const catB = tool("2", "bash", { command: "cat src/b.ts" });
+    const cite = tool("3", "update_card", {
+      findings: [
+        { topic: "a.ts", detail: "starts with imports", sources: ["src/a.ts"] },
+      ],
+    });
+    const grace = tool("4", "bash", { command: "cat src/b.ts" });
+    const finalCheckpoint = tool("5", "update_card", { pending: ["done"] });
+
+    const messages: ContextMessage<string>[] = [
+      user("Continue"),
+      assistant("head-a", [headA]),
+      resultFor(headA, "a-head-contents"),
+      assistant("cat-b", [catB]),
+      resultFor(catB, "b-contents"),
+      assistant("cite", [cite]),
+      resultFor(cite, "Card updated."),
+      assistant("grace", [grace]),
+      resultFor(grace, "b-contents-again"),
+      assistant("checkpoint", [finalCheckpoint]),
+      resultFor(finalCheckpoint, "Card updated."),
+    ];
+
+    const projected = projectContext(messages);
+    const texts = projected.messages.map((m) => String(m));
+    // If "50" had been mistaken for the path, nothing would have cited
+    // "src/a.ts" and head-a would still be active, not retired.
+    expect(texts.some((t) => t === "tools:head-a")).toBe(false);
+    expect(projected.retired.findingConsumed).toBeGreaterThanOrEqual(1);
+  });
+});
+
 interface ToolCall {
   id: string;
   name: string;
