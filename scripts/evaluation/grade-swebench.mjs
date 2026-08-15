@@ -149,6 +149,37 @@ async function main() {
         2,
       )}\n`,
     );
+    // An empty patch means the agent made no changes at all - a real,
+    // common, and unambiguous outcome (definitionally unresolved), not a
+    // grading failure. The official harness itself skips these ("Instances
+    // with empty patches") rather than writing a per-instance report.json,
+    // which otherwise looks identical to a genuine grading crash. Short-
+    // circuit before invoking Docker at all: there's nothing to test.
+    if (submittedPatch.trim().length === 0) {
+      grades.push({
+        run: candidate.name,
+        variant: candidate.variant,
+        repeat: candidate.repeat,
+        rawPredictionPath: candidate.predictionPath,
+        predictionPath,
+        rawPatchBytes: candidate.modelPatch?.bytes ?? 0,
+        submittedPatchBytes: 0,
+        submittedPatchSha256: createHash("sha256")
+          .update(submittedPatch)
+          .digest("hex"),
+        process: { exitCode: 0, timedOut: false, skipped: "empty-patch" },
+        official: {
+          completed: true,
+          patchApplied: false,
+          resolved: false,
+          emptyPatch: true,
+          failToPass: { success: 0, failure: 0 },
+          passToPass: { success: 0, failure: 0 },
+        },
+        reports: [],
+      });
+      continue;
+    }
     const result = await run(
       python,
       [

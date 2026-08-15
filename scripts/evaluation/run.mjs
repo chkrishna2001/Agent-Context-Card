@@ -45,6 +45,14 @@ function safeName(value) {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+// A single pathological tool call (e.g. a model-issued shell command with a
+// malformed heredoc that never terminates) can stream output for the whole
+// turn timeout. Unconditionally accumulating that in a JS string eventually
+// exceeds V8's max string length and crashes the harness itself rather than
+// just failing the one turn. Cap the in-memory copy far below that; the full
+// raw stream still reaches disk via stdoutStream/stderrStream regardless.
+const MAX_BUFFERED_OUTPUT_BYTES = 50 * 1024 * 1024;
+
 async function runProcess(command, args, options = {}) {
   const started = performance.now();
   return await new Promise((resolve) => {
@@ -57,6 +65,8 @@ async function runProcess(command, args, options = {}) {
     child.stdin?.end();
     let stdout = "";
     let stderr = "";
+    let stdoutBytes = 0;
+    let stdoutCapped = false;
     let timedOut = false;
     let settled = false;
     let forcedResolutionTimer;
@@ -66,9 +76,30 @@ async function runProcess(command, args, options = {}) {
     const stderrStream = options.stderrFile
       ? createWriteStream(options.stderrFile)
       : undefined;
+    const killChild = () => {
+      if (process.platform === "win32" && child.pid) {
+        const killer = spawn(
+          "taskkill",
+          ["/pid", String(child.pid), "/T", "/F"],
+          { windowsHide: true },
+        );
+        killer.stdin?.end();
+      } else {
+        child.kill("SIGKILL");
+      }
+    };
     child.stdout?.on("data", (chunk) => {
-      stdout += chunk.toString();
       stdoutStream?.write(chunk);
+      if (stdoutCapped) return;
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_BUFFERED_OUTPUT_BYTES) {
+        stdoutCapped = true;
+        stdout +=
+          "\n[... stdout truncated: exceeded buffered output cap, process killed ...]\n";
+        killChild();
+        return;
+      }
+      stdout += chunk.toString();
     });
     child.stderr?.on("data", (chunk) => {
       stderr += chunk.toString();
@@ -86,16 +117,7 @@ async function runProcess(command, args, options = {}) {
     const timer = setTimeout(
       () => {
         timedOut = true;
-        if (process.platform === "win32" && child.pid) {
-          const killer = spawn(
-            "taskkill",
-            ["/pid", String(child.pid), "/T", "/F"],
-            { windowsHide: true },
-          );
-          killer.stdin?.end();
-        } else {
-          child.kill("SIGKILL");
-        }
+        killChild();
         forcedResolutionTimer = setTimeout(
           () =>
             finish({
@@ -122,8 +144,8 @@ async function runProcess(command, args, options = {}) {
     });
     child.on("close", (code, signal) => {
       finish({
-        exitCode: code ?? -1,
-        signal,
+        exitCode: stdoutCapped ? -1 : (code ?? -1),
+        signal: stdoutCapped ? "stdout-cap" : signal,
         stdout,
         stderr,
         durationMs: performance.now() - started,
@@ -656,7 +678,13 @@ async function main() {
           stdoutFile,
           stderrFile,
         });
-        await writeFile(stdoutFile, result.stdout);
+        // stdoutStream already wrote the full raw output progressively;
+        // only re-write it here in the normal case. When output was capped
+        // mid-stream, result.stdout is the truncated in-memory copy - the
+        // on-disk file (already complete up to the cap point) must not be
+        // clobbered with it.
+        if (result.signal !== "stdout-cap")
+          await writeFile(stdoutFile, result.stdout);
         await writeFile(stderrFile, result.stderr);
         const sessionPaths = await filesBelow(sessionDirectory, ".jsonl");
         if (variant.sessionMode === "continue" && !continuedSessionFile)

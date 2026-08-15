@@ -286,6 +286,220 @@ All three items from the agreed strategy are now done: automatic disuse
 retirement, tightened/validated forcing, and the local/global consistency
 fix underneath both.
 
+## 2026-08-15: bash-based reads were invisible to all of it
+
+Fourth live EstimateStudio trial (same pinned `openrouter-pinned/openai/gpt-5-nano`,
+same clean baseline, after committing and pushing everything above as
+`eb9b4e7`). Zero edits again, but two real firsts: it reached a natural
+stop instead of a truncation, and it populated `findings[].sources` for the
+first time across four trials, with genuine content. Window still climbed
+to 77% with `findingConsumed`/`disused`/`staleRead` all at 0 nearly the
+whole session, though - not because retirement failed, but because the
+session explored via 26 `bash cat`/`grep`-style calls and only 1 `read`
+call. Every retirement mechanism (`consumedReads`, `consumedByFinding`,
+`consumedByDisuse`) is gated on `isRead(call)`, which only recognizes the
+dedicated `read`/`view_file` tool names - a `bash cat file.ts` call is
+invisible to all three, permanently "active" by construction, no matter
+how irrelevant it becomes.
+
+User's framing, worth keeping verbatim: rejected going further down the
+"detect every possible read-like tool" path (correctly identified as the
+same whack-a-mole pattern as the earlier build-artifact-denylist idea I'd
+already talked myself out of once) in favor of treating a bash call and a
+dedicated read call as the same *kind* of event when they produce the same
+outcome - full file content entering context - regardless of which tool
+produced it. Floated a further idea (a canonical store the model reads
+from instead of the raw tool output) but self-identified it as edging into
+"semantic memory," one of the README's own rejected alternatives, and
+scoped this pass to the narrower, purely-internal version: widen
+detection, keep it invisible to the model, no new tools, no behavior
+change.
+
+**Done:** added `bashReadPath`/`readPath`/`isReadLike` to
+`src/core/projection.ts`. `bashReadPath` recognizes bash calls whose
+command is a single, unpiped, unchained, unredirected `cat`/`head`/`tail`/
+`less`/`more` of one file, and extracts that file's path conservatively
+(bails to `undefined` rather than guess on multi-file or ambiguous
+commands; guards against mistaking a flag's numeric value, e.g. the "50"
+in `head -n 50 file.ts`, for the path). Every consumer of `isRead`/
+`filePath` for read-classification purposes (`consumedReads`,
+`consumedByFinding`, `consumedByDisuse`, `consumedDiscovery`'s
+listing-then-read check, `isInActiveRounds`, the `projectionDetails`
+categorization loop and hotEvidence builder, `hasReferenceOverlap`'s
+path-substring exemption) now goes through `isReadLike`/`readPath` instead,
+so a bash-based read is treated identically to a dedicated `read` call
+everywhere in the evidence lifecycle - not a parallel mechanism, the exact
+same one.
+
+5 new tests in a new `"reads via bash"` describe block: consumed by a
+later mutation, retired via finding-citation, retired via disuse, a
+negative case (piped/chained/redirected commands are never attributed to
+avoid guessing wrong), and the flag-value extraction edge case. Two of the
+five needed the same fixture fix as earlier sessions today (a second,
+later `update_card` so the citation lands in the same projection pass
+instead of the single-round-prefix "keep the final round regardless"
+fallback swallowing the result) - the same pitfall, recognized faster this
+time. Fault-injection confirmed: disabled `bashReadPath`, 4 of 5 new tests
+failed as expected (the negative case correctly still passed either way),
+restored. 110/110 tests passing, tsc/eslint/prettier/build all clean.
+
+## 2026-08-15: first SWE-bench re-run since the methodology caveat, officially graded
+
+Ran `evaluation/benchmarks/swebench-verified-sympy-18211.json` end to end
+with today's code: `run.mjs` for the baseline/card comparison, then
+`grade-swebench.mjs` for official Docker-based SWE-bench correctness
+grading (found the checked-in venv at `.agent-context-card/swebench-venv`,
+not `.venv`). Three environment problems on the way, none of them bugs in
+today's changes: the original benchmark model (`llama-cloud/gemma4:31b`,
+via Ollama Cloud) is gone from this machine entirely, so substituted
+`google-ai-studio/gemma-4-31b-it` - which promptly hit a 16k-token/minute
+free-tier quota wall on request 3. Switched to the pinned
+`openrouter-pinned/openai/gpt-5-nano` already used for today's live
+trials, which then rejected the config's `thinking: "off"` ("Reasoning is
+mandatory for this endpoint"). Set `--thinking low` and it ran clean.
+Official grading itself then failed once on a Docker daemon connection
+error - Python's `docker` SDK defaults to the legacy `npipe:////./pipe/docker_engine`
+pipe, but this machine's active context (`desktop-linux`) exposes
+`npipe:////./pipe/dockerDesktopLinuxEngine` instead. Setting
+`DOCKER_HOST` explicitly fixed it.
+
+**Officially graded result (Docker-verified, not self-reported):**
+
+| | Baseline | Card |
+| --- | --- | --- |
+| Resolved | **no** | **yes** |
+| FAIL_TO_PASS | 0/1 | 1/1 |
+| PASS_TO_PASS | 54/54 | 54/54 |
+| Provider input tokens | 883,089 | 209,778 (-76.2%) |
+| Requests | 27 | 18 (-33.3%) |
+| Tool calls | 24 | 15 (-37.5%) |
+| Tool errors | 9 | 3 (-62.5%) |
+| Duration | 119.7s | 81.1s (-32.2%) |
+
+The historical ledger entry for this exact instance (`gemma4:31b`, the
+now-removed `fresh`-session-bridge architecture) recorded the same
+qualitative result - baseline unresolved, card resolved - with similar-
+magnitude efficiency gains (-79% input, -62.5% requests, -66% tool calls,
+-100% tool errors, -34.5% duration). Different model, different session
+architecture, none of the mechanisms built this session existed when the
+original ran. This is the first re-run since the ledger's own
+methodologyCaveat flagged the old numbers as "pending re-run, not current
+evidence," and the correctness claim replicated cleanly under completely
+different conditions - about as strong an independent check as a single
+instance can give. One caveat worth being honest about: this instance
+didn't require much back-and-forth (a `-p` single-shot session did produce
+a working patch here, unlike every EstimateStudio trial), so it isn't
+direct evidence against the "ends with a plan instead of editing" pattern
+observed all day - just evidence that when a model *does* commit to
+editing, the card measurably helps.
+
+## 2026-08-15: second pilot (sympy-21930) — two real harness bugs found and fixed, and an honest, less flattering result
+
+Same setup, same model. Hit two genuine infrastructure bugs in
+`scripts/evaluation/`, both fixed (not core product code, but real,
+reproducible, blocking):
+
+1. **`run.mjs` crashed the whole harness on a runaway tool call.** The
+   model issued a malformed bash command (`bash -lc python -V && python -
+   << 'PY' ...` - mixing `-lc` with an unquoted heredoc chain), which
+   streamed continuously for the full 20-minute turn timeout. `run.mjs`
+   unconditionally accumulated all child-process stdout in a single JS
+   string (`stdout += chunk.toString()`); at ~537MB that exceeded V8's max
+   string length and crashed the entire comparison, losing the already-
+   completed baseline result along with it. Fixed by capping the in-memory
+   accumulation at 50MB and killing the child process past that point -
+   the full raw stream still reaches disk via the existing (already
+   correct) `stdoutStream`/`stdoutFile` mechanism regardless, so nothing
+   about normal-sized runs changed, only the pathological case stopped
+   crashing the harness.
+2. **`grade-swebench.mjs` crashed on a legitimate empty-patch outcome.**
+   When an agent makes no code changes at all, the official SWE-bench
+   harness correctly skips grading that instance entirely (nothing to
+   test) rather than writing a per-instance report - which looked
+   identical to a genuine grading failure to the wrapper script, which
+   threw `report missing`. An empty patch is a real, common, unambiguous
+   result (definitionally unresolved), not an error. Fixed by
+   short-circuiting before invoking Docker at all when the patch is empty,
+   recording `resolved: false, emptyPatch: true` directly.
+
+Also needed the same `DOCKER_HOST` fix as the first pilot, and the same
+`timeoutMs` bump (300000 -> 1200000) in the checked-in config, since this
+instance's baseline implement turn hit the original 5-minute cap even
+before the crash was diagnosed.
+
+**Result, honestly - this one does not repeat the clean win:**
+
+| | Baseline | Card |
+| --- | --- | --- |
+| Patch produced | yes (2754 bytes) | **no (empty)** |
+| Resolved | no | no |
+| FAIL_TO_PASS | 0/6 | 0/6 (no attempt) |
+| PASS_TO_PASS | 45/45 | n/a (not run) |
+| Provider input tokens | 360,584 | 169,157 (-53.1%) |
+| Requests | 21 | 9 (-57.1%) |
+| Tool calls | 18 | 6 (-66.7%) |
+
+Baseline's 0/6 matches the historical ledger entry for this exact instance
+exactly. But the historical *card* run got 5/6 FAIL_TO_PASS (close, not
+resolved) - today's card run made no attempt at all, ending with a fully
+empty patch despite six tool calls across implement and review. That's a
+real regression relative to the historical run on this specific instance,
+not something to gloss over. Consistent with the pattern seen all day
+(EstimateStudio, and to a lesser extent the first pilot): the failure mode
+on this instance isn't a context-management problem - card used dramatically
+fewer tokens and requests to get there - it's the same "explores, maybe
+edits, then stops before finishing" behavior. Efficiency and correctness
+are not the same axis, and this pilot is a clean example of the card
+winning heavily on one while not helping (arguably placing exactly where
+baseline also failed) on the other.
+
+## 2026-08-15: fifth live trial — the biggest improvement yet, mostly for a different reason than expected
+
+Same pinned model, same clean baseline, run immediately after the bash-read
+fix (uncommitted but live, since the extension loads source directly).
+Zero edits again - fifth trial in a row without one - but context usage
+stayed dramatically bounded: ~20% of window by request 55, versus ~77% by
+request 27 last time, despite this run doing *more* work (25 bash + 15
+read + 10 update_card + 4 update_progress vs. last time's 26 bash + 1
+read + 1 update_card). `disused` climbed steadily to 5 over the session -
+the first time automatic disuse retirement has visibly engaged in a live
+run.
+
+Important correction before crediting the wrong fix: this model used the
+dedicated `read` tool for actual file content (15 calls) and `rg` for
+searching (already handled by existing discovery-collapse), not
+`cat`/`head`/`tail` via bash. The bash-read widening from today wasn't
+really exercised this run - the improvement is attributable to
+`consumedByDisuse` correctly retiring ordinary `read` calls nothing came
+back to, not to the new bash detection. Model/run variance chose a
+different exploration style than the trial that motivated the fix; the fix
+itself remains unvalidated live, just unit-tested.
+
+Also confirmed working end-to-end: forcing fired 10 times
+(`activity=11; streak=1` every single time) and never needed a second
+consecutive force - meaning every forced `update_card` call came back with
+real substance, not a thin no-op. The tightened-trigger-plus-substance-
+validation mechanism from step 2 is doing exactly what it was built to do.
+
+Minor edge case noticed in passing, not yet a problem: this model wrapped
+bash commands as `bash -lc "actual command"` - a command string starting
+with "bash", not "cat"/"head"/etc. `bashReadPath` would not recognize a
+doubly-wrapped `bash -lc "cat file.ts"` as a read (it only matches the
+command starting directly with a read-like verb). Didn't come up this run
+since the model used `rg`/`read` instead, but worth knowing about if a
+future trial uses bash-wrapped cat and doesn't get picked up.
+
+**Where this leaves things:** the context-management side of the original
+thesis now has real, positive live evidence for the first time across five
+trials - not just unit tests. The remaining, now-clearly-isolated problem
+is different in kind: every single trial, regardless of model, context
+usage, or how much of the card mechanism engaged, has ended with a status
+write-up instead of continuing into `edit`/`write` calls. That's not a
+context-budget problem anymore - this run had budget to spare. It's a
+separate question about why these models stop at "here's the plan" instead
+of executing it in `-p` single-shot sessions, and nothing built this
+session addresses it.
+
 **Proposed synthesis (not yet agreed, still open):** tighten (b)'s trigger to fire
 immediately after a large/costly read rather than on a generic activity
 counter, and — this is the part that ties everything today together —
