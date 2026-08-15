@@ -17,6 +17,7 @@ import {
 } from "../core/continuity";
 import { buildExecutionJournal, isMutationToolName } from "../core/execution";
 import {
+  formatCardStatus,
   formatContextCard,
   planPhaseFramingState,
   planProjectionState,
@@ -30,6 +31,7 @@ import {
   CARD_MESSAGE_TYPE,
   CARD_NUDGE_MESSAGE_TYPE,
   CARD_STATE_ENTRY_TYPE,
+  STATUS_MESSAGE_TYPE,
   emptyAnchor,
   emptyCardState,
   emptyExecutionJournal,
@@ -68,6 +70,11 @@ import { tryForceUpdateCardToolCall } from "./before_provider_request";
 
 const CARD_ACTIVITY_NUDGE_THRESHOLD = 10;
 const CARD_NUDGE_STREAK_CAP = 2;
+// A read this large is worth distilling before it's just left sitting in
+// context - large enough that "a costly read just happened" is a real,
+// pointed reason to ask now rather than waiting for the generic activity
+// counter to catch up.
+const COSTLY_READ_CHARS = 4000;
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value), 10);
@@ -101,6 +108,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let latestRequest = "";
   let previousTurnSettled = false;
   let lastCard = "";
+  let lastStatus = "";
   let lastAudit: ProjectionAudit | undefined;
   let taskId: string | undefined;
   let plan: PinnedPlan | undefined;
@@ -113,6 +121,12 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let cardActivitySinceUpdate = 0;
   let cardNudgeStreak = 0;
   let forceNudgeStreak = 0;
+  // True from the moment a forced update_card tool_choice is issued until
+  // that call actually lands, so the tool's own handler can tell a real
+  // response from a no-op one - forcing only compels the call, not its
+  // content, so a thin response shouldn't reset the streaks as if it had
+  // resolved anything.
+  let awaitingForcedSubstance = false;
   // Global by default; overridable so tests never touch the real user
   // profile directory.
   const sessionStore = new SessionCardStore(
@@ -153,6 +167,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     cardActivitySinceUpdate = 0;
     cardNudgeStreak = 0;
     forceNudgeStreak = 0;
+    awaitingForcedSubstance = false;
   };
 
   pi.registerFlag("context-card-recent-turns", {
@@ -200,6 +215,8 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     cardState = emptyCardState();
     cardActivitySinceUpdate = 0;
     cardNudgeStreak = 0;
+    forceNudgeStreak = 0;
+    awaitingForcedSubstance = false;
     for (const entry of branch) {
       if (entry.type !== "custom" || entry.customType !== ANCHOR_ENTRY_TYPE)
         continue;
@@ -460,8 +477,24 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         "write",
         "apply_patch",
       ].includes(name)
-    )
+    ) {
       cardActivitySinceUpdate++;
+      if (["read", "view_file"].includes(name)) {
+        const resultText = event.result
+          ? messageText(event.result as AgentMessage)
+          : "";
+        if (resultText.length > COSTLY_READ_CHARS) {
+          // A big read is worth distilling before anything else happens -
+          // push straight past the generic activity threshold instead of
+          // waiting for it to accumulate on its own, so the nudge/force
+          // machinery below engages on the very next opportunity.
+          cardActivitySinceUpdate = Math.max(
+            cardActivitySinceUpdate,
+            CARD_ACTIVITY_NUDGE_THRESHOLD + 1,
+          );
+        }
+      }
+    }
   });
   pi.on("turn_end", async (event, ctx) => {
     previousTurnSettled =
@@ -518,7 +551,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     const withoutCards = event.messages.filter(
       (message) =>
         !(
-          message.role === "custom" && message.customType === CARD_MESSAGE_TYPE
+          message.role === "custom" &&
+          (message.customType === CARD_MESSAGE_TYPE ||
+            message.customType === STATUS_MESSAGE_TYPE)
         ),
     );
     if (!anchor.goal) {
@@ -551,6 +586,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       planProjectionMode: planProjectionMode(),
       planPhaseFramingMode: planPhaseFramingMode(),
     });
+    lastStatus = formatCardStatus(card);
     const retiredNotes =
       card.plan?.scopeNotes &&
       planPhaseFramingState(card, {
@@ -566,6 +602,19 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       display: false,
       timestamp: Date.now(),
     };
+    // Kept out of cardMessage (position 0) so its near-every-round churn
+    // (findings, pending, file-read leases, failures) doesn't invalidate
+    // the provider's prefix cache for the stable conversation history that
+    // sits between the two messages.
+    const statusMessage: AgentMessage | undefined = lastStatus
+      ? {
+          role: "custom",
+          customType: STATUS_MESSAGE_TYPE,
+          content: lastStatus,
+          display: false,
+          timestamp: Date.now(),
+        }
+      : undefined;
 
     const branch = ctx.sessionManager.getBranch();
     let auditTurn = -1;
@@ -584,7 +633,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
             entry.type === "custom" && entry.customType === AUDIT_ENTRY_TYPE,
         ).length + 1;
     const estimatedProjectedTokens = Math.ceil(
-      (projection.projectedChars + lastCard.length) / 4,
+      (projection.projectedChars + lastCard.length + lastStatus.length) / 4,
     );
     const contextWindow = ctx.model?.contextWindow;
     lastAudit = {
@@ -597,6 +646,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         ? (estimatedProjectedTokens / contextWindow) * 100
         : undefined,
       cardChars: lastCard.length,
+      statusChars: lastStatus.length,
       originalMessages: scoped.length,
       projectedMessages: projection.messages.length,
       originalChars: projection.originalChars,
@@ -632,7 +682,11 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       "agent-context-card",
       `${projection.retiredMessages} message(s) retired · ${projection.messages.length} live`,
     );
-    return { messages: [cardMessage, ...projection.messages] };
+    return {
+      messages: statusMessage
+        ? [cardMessage, ...projection.messages, statusMessage]
+        : [cardMessage, ...projection.messages],
+    };
   });
 
   pi.registerCommand("card", {
@@ -642,14 +696,16 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         branchMessages(ctx.sessionManager.getBranch()),
       );
       const projection = projectContext(normalized, 2);
-      lastCard = formatContextCard(
-        runtimeCard(ctx, normalized, projection.hotEvidence),
-        {
-          planProjectionMode: planProjectionMode(),
-          planPhaseFramingMode: planPhaseFramingMode(),
-        },
+      const card = runtimeCard(ctx, normalized, projection.hotEvidence);
+      lastCard = formatContextCard(card, {
+        planProjectionMode: planProjectionMode(),
+        planPhaseFramingMode: planPhaseFramingMode(),
+      });
+      lastStatus = formatCardStatus(card);
+      ctx.ui.notify(
+        lastStatus ? `${lastCard}\n${lastStatus}` : lastCard,
+        "info",
       );
-      ctx.ui.notify(lastCard, "info");
     },
   });
   pi.registerCommand("card-new", {
@@ -712,6 +768,12 @@ export default function agentContextCard(pi: ExtensionAPI): void {
           Type.Object({
             topic: Type.String(),
             detail: Type.String(),
+            sources: Type.Optional(
+              Type.Array(Type.String(), {
+                description:
+                  "File paths this finding distills. Citing a path here lets its raw read retire from context once this finding has been recorded, instead of both staying in context.",
+              }),
+            ),
           }),
         ),
       ),
@@ -720,7 +782,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       _toolCallId: string,
       params: {
         pending?: string[];
-        findings?: { topic: string; detail: string }[];
+        findings?: { topic: string; detail: string; sources?: string[] }[];
       },
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
@@ -732,11 +794,33 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         cardState.findings = params.findings.map((finding) => ({
           topic: finding.topic,
           detail: finding.detail,
+          sources: finding.sources,
         }));
       persistCardState();
-      cardActivitySinceUpdate = 0;
-      cardNudgeStreak = 0;
-      forceNudgeStreak = 0;
+
+      const hasSubstance =
+        (Array.isArray(params.pending) &&
+          params.pending.some((item) => item.trim())) ||
+        (Array.isArray(params.findings) &&
+          params.findings.some((finding) => finding.detail?.trim()));
+      const wasForced = awaitingForcedSubstance;
+      awaitingForcedSubstance = false;
+
+      if (wasForced && !hasSubstance) {
+        // Forcing compels the call, not its content - a thin response to a
+        // forced request hasn't actually resolved anything, so the streaks
+        // (and the force itself) stay live for the next request instead of
+        // being cleared as if it had.
+        taskAudit(
+          "forcing",
+          "skipped",
+          `forced update_card returned no findings/pending; streak=${forceNudgeStreak}`,
+        );
+      } else {
+        cardActivitySinceUpdate = 0;
+        cardNudgeStreak = 0;
+        forceNudgeStreak = 0;
+      }
       return {
         content: [{ type: "text", text: "Card updated." }],
         details: {},
@@ -746,7 +830,11 @@ export default function agentContextCard(pi: ExtensionAPI): void {
 
   pi.on("before_provider_request", (event, _ctx) => {
     const payload = event.payload;
-    if (payload === undefined || payload === null || typeof payload !== "object") {
+    if (
+      payload === undefined ||
+      payload === null ||
+      typeof payload !== "object"
+    ) {
       return undefined;
     }
     const payloadWithOrder = payload as Record<string, unknown>;
@@ -779,6 +867,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       const forcedPayload = tryForceUpdateCardToolCall(payload);
       if (forcedPayload !== undefined) {
         forceNudgeStreak++;
+        awaitingForcedSubstance = true;
         taskAudit(
           "forcing",
           "info",
@@ -789,4 +878,4 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     }
     return undefined;
   });
-};
+}

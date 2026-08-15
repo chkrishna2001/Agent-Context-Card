@@ -151,6 +151,21 @@ export function formatContextCard(
     for (const row of capabilityRows) lines.push(`- ${row}`);
   }
 
+  lines.push("</context-card>");
+  return lines.join("\n");
+}
+
+// Everything here changes on nearly every tool round: execution changes,
+// pending items, findings, file-read leases, failures, resumed facts. The
+// header above (goal, plan, capabilities) stays essentially fixed for the
+// whole task, so callers should place this as a separate trailing message
+// after the projected conversation rather than folding it into the leading
+// card - that keeps the large stable history a valid, ever-growing
+// cacheable provider prefix, and only this small block needs reprocessing
+// when it changes.
+export function formatCardStatus(card: RuntimeCard): string {
+  const lines: string[] = [];
+
   if (card.execution.changes.length) {
     lines.push(
       `what happened: ${card.execution.changes.map(formatChange).join("; ")}`,
@@ -162,9 +177,15 @@ export function formatContextCard(
   if (card.findings && card.findings.length) {
     lines.push(`findings: ${card.findings.map(formatFinding).join("; ")}`);
   }
-  if (card.filesRead && card.filesRead.length) {
+  // Active entries duplicate content already visible in the projected
+  // transcript itself; only non-active entries (e.g. consumed) tell the
+  // model something it can no longer see directly.
+  const nonActiveFilesRead = card.filesRead?.filter(
+    (entry) => entry.state !== "active",
+  );
+  if (nonActiveFilesRead && nonActiveFilesRead.length) {
     lines.push(
-      `files read: ${card.filesRead
+      `files read: ${nonActiveFilesRead
         .map((entry) => `${entry.path} (${entry.state})`)
         .join(", ")}`,
     );
@@ -196,6 +217,8 @@ export function formatContextCard(
     }
   }
 
-  lines.push("</context-card>");
-  return lines.join("\n");
+  if (lines.length === 0) return "";
+  return ["<context-card-status>", ...lines, "</context-card-status>"].join(
+    "\n",
+  );
 }

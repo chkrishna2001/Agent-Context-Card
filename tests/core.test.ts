@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildExecutionJournal } from "../src/core/execution";
 import {
+  formatCardStatus,
   formatContextCard,
   planPhaseFramingState,
   planProjectionState,
@@ -181,7 +182,7 @@ describe("card extraction", () => {
   });
 
   test("renders flat top-level fields in the documented order", () => {
-    const card = formatContextCard({
+    const runtimeCard = {
       goal: "Implement JIRA-123",
       taskId: "JIRA-123",
       capabilities: {
@@ -195,22 +196,22 @@ describe("card extraction", () => {
         changes: [
           {
             action: "edit source.ts",
-            kind: "change",
-            status: "success",
+            kind: "change" as const,
+            status: "success" as const,
             count: 1,
           },
           {
             action: "shell_command bun test",
-            kind: "validation",
-            status: "success",
+            kind: "validation" as const,
+            status: "success" as const,
             count: 2,
           },
         ],
         failures: [
           {
             action: "edit missing.ts",
-            kind: "change",
-            status: "failed",
+            kind: "change" as const,
+            status: "failed" as const,
             count: 1,
             detail: "ENOENT",
           },
@@ -222,31 +223,36 @@ describe("card extraction", () => {
         root: "C:/Users/chkri/source/repos/agent-context-card",
         head: "abcdef0123456789abcdef0123456789abcdef01",
       },
-    });
+    };
+    const card = formatContextCard(runtimeCard);
     expect(card).toContain("goal: Implement JIRA-123");
     expect(card).toContain("TASK ID: JIRA-123");
     expect(card).toContain("project: Deterministic context projection");
     expect(card).toContain(
       "repo: C:/Users/chkri/source/repos/agent-context-card @ abcdef01",
     );
-    expect(card).toContain(
-      "what happened: edit source.ts; shell_command bun test ×2",
-    );
-    expect(card).toContain("what's pending: verify rebuild");
-    expect(card).toContain("findings: schema: no caps allowed");
-    expect(card).toContain("failures: edit missing.ts — ENOENT");
     const goalIdx = card.indexOf("goal:");
     const taskIdIdx = card.indexOf("TASK ID:");
     const projectIdx = card.indexOf("project:");
     const repoIdx = card.indexOf("repo:");
-    const whatIdx = card.indexOf("what happened:");
-    const pendingIdx = card.indexOf("what's pending:");
-    const findingsIdx = card.indexOf("findings:");
-    const failuresIdx = card.indexOf("failures:");
     expect(goalIdx).toBeLessThan(taskIdIdx);
     expect(taskIdIdx).toBeLessThan(projectIdx);
     expect(projectIdx).toBeLessThan(repoIdx);
-    expect(repoIdx).toBeLessThan(whatIdx);
+
+    // The volatile fields (execution, pending, findings, failures) render
+    // separately so their churn doesn't invalidate a provider's prefix
+    // cache for the stable card above.
+    const status = formatCardStatus(runtimeCard);
+    expect(status).toContain(
+      "what happened: edit source.ts; shell_command bun test ×2",
+    );
+    expect(status).toContain("what's pending: verify rebuild");
+    expect(status).toContain("findings: schema: no caps allowed");
+    expect(status).toContain("failures: edit missing.ts — ENOENT");
+    const whatIdx = status.indexOf("what happened:");
+    const pendingIdx = status.indexOf("what's pending:");
+    const findingsIdx = status.indexOf("findings:");
+    const failuresIdx = status.indexOf("failures:");
     expect(whatIdx).toBeLessThan(pendingIdx);
     expect(pendingIdx).toBeLessThan(findingsIdx);
     expect(findingsIdx).toBeLessThan(failuresIdx);
@@ -260,10 +266,13 @@ describe("card extraction", () => {
     });
     expect(card).not.toContain("project:");
     expect(card).not.toContain("repo:");
-    expect(card).not.toContain("what happened:");
-    expect(card).not.toContain("what's pending:");
-    expect(card).not.toContain("findings:");
-    expect(card).not.toContain("failures:");
+
+    const status = formatCardStatus({
+      goal: "Inspect the project",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+    });
+    expect(status).toBe("");
   });
 
   test("renders repo from a headless provenance as just the root path", () => {
@@ -279,8 +288,8 @@ describe("card extraction", () => {
     expect(card).not.toContain("@");
   });
 
-  test("renders files read between findings and failures when present", () => {
-    const card = formatContextCard({
+  test("renders only non-active files read between findings and failures when present", () => {
+    const status = formatCardStatus({
       goal: "Inspect",
       capabilities: { documentation: [], validation: [] },
       execution: { changes: [], failures: [] },
@@ -300,18 +309,21 @@ describe("card extraction", () => {
         },
       ],
     });
-    expect(card).toContain(
-      "files read: src/a.ts (active), src/b.ts (consumed)",
-    );
-    const findingsIdx = card.indexOf("findings:");
-    const filesIdx = card.indexOf("files read:");
+    // src/a.ts is "active": its full content is still visible in the
+    // projected transcript, so repeating its path here is pure redundant
+    // token cost. Only src/b.ts ("consumed") is worth telling the model
+    // about, since that content is no longer directly visible.
+    expect(status).toContain("files read: src/b.ts (consumed)");
+    expect(status).not.toContain("src/a.ts");
+    const findingsIdx = status.indexOf("findings:");
+    const filesIdx = status.indexOf("files read:");
     expect(findingsIdx).toBeGreaterThan(-1);
     expect(filesIdx).toBeGreaterThan(findingsIdx);
-    expect(card).not.toContain("failures:");
+    expect(status).not.toContain("failures:");
   });
 
-  test("omits files read line entirely when filesRead is empty or absent", () => {
-    const empty = formatContextCard({
+  test("omits files read line entirely when filesRead is empty, absent, or all-active", () => {
+    const empty = formatCardStatus({
       goal: "Inspect",
       capabilities: { documentation: [], validation: [] },
       execution: { changes: [], failures: [] },
@@ -319,12 +331,23 @@ describe("card extraction", () => {
     });
     expect(empty).not.toContain("files read:");
 
-    const missing = formatContextCard({
+    const missing = formatCardStatus({
       goal: "Inspect",
       capabilities: { documentation: [], validation: [] },
       execution: { changes: [], failures: [] },
     });
     expect(missing).not.toContain("files read:");
+
+    const allActive = formatCardStatus({
+      goal: "Inspect",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+      filesRead: [
+        { path: "src/a.ts", version: "1", toolCallId: "a", state: "active" },
+        { path: "src/c.ts", version: "3", toolCallId: "c", state: "active" },
+      ],
+    });
+    expect(allActive).not.toContain("files read:");
   });
 
   test("phase-aware projection retires a completed plan body only outside execution phases", () => {
@@ -440,7 +463,7 @@ describe("card extraction", () => {
     ).toBe("planning");
   });
   test("keeps the exact pinned plan and labels resumed facts as historical", () => {
-    const card = formatContextCard({
+    const runtimeCard = {
       goal: "Implement JIRA-123",
       capabilities: { documentation: [], validation: [] },
       execution: { changes: [], failures: [] },
@@ -456,18 +479,24 @@ describe("card extraction", () => {
           changes: [
             {
               action: "shell_command bun test",
-              kind: "validation",
-              status: "success",
+              kind: "validation" as const,
+              status: "success" as const,
               count: 1,
             },
           ],
           failures: [],
         },
       },
-    });
+    };
+    const card = formatContextCard(runtimeCard);
     expect(card).toContain("PINNED PLAN (revision 2)");
     expect(card).toContain("1. Inspect\n  2. Implement");
-    expect(card).toContain("PRIOR SESSION VERIFIED FACTS");
-    expect(card).toContain("REPOSITORY STATE CHANGED");
+
+    // Resumed facts are volatile (they fold into "what happened" as the
+    // session progresses), so they render in formatCardStatus, not the
+    // stable card.
+    const status = formatCardStatus(runtimeCard);
+    expect(status).toContain("PRIOR SESSION VERIFIED FACTS");
+    expect(status).toContain("REPOSITORY STATE CHANGED");
   });
 });

@@ -600,6 +600,109 @@ describe("Pi adapter", () => {
     expect(third).toBeUndefined();
   });
 
+  test("a single costly read forces update_card without waiting for the activity threshold", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    // One read, but a large one - should push straight past the generic
+    // activity threshold rather than needing ten more reads first.
+    await extension.toolExecutionEnd({
+      toolName: "read",
+      isError: false,
+      result: { content: [{ type: "text", text: "x".repeat(5000) }] },
+    });
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const result = await extension.beforeProviderRequest(payload);
+    expect(result).toBeDefined();
+    expect((result as any).tool_choice).toEqual({
+      type: "function",
+      function: { name: "update_card" },
+    });
+  });
+
+  test("a single small read does not force update_card", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.toolExecutionEnd({
+      toolName: "read",
+      isError: false,
+      result: { content: [{ type: "text", text: "small file" }] },
+    });
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const result = await extension.beforeProviderRequest(payload);
+    expect(result).toBeUndefined();
+  });
+
+  test("a thin response to a forced update_card does not reset the activity streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 11; index += 1) {
+      await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    }
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const forced = await extension.beforeProviderRequest(payload);
+    expect(forced).toBeDefined();
+
+    const tool = extension.tools.find((t) => t.name === "update_card");
+    expect(tool).toBeDefined();
+    if (!tool) throw new Error("update_card tool missing");
+    // Responds to the force with nothing - no pending, no findings.
+    await tool.execute("call-1", {}, undefined, undefined, {} as any);
+
+    // Activity never reset, so a single further read keeps it above the
+    // threshold and forcing should engage again immediately.
+    await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    const forcedAgain = await extension.beforeProviderRequest(payload);
+    expect(forcedAgain).toBeDefined();
+  });
+
+  test("a real response to a forced update_card resets the activity streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 11; index += 1) {
+      await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    }
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const forced = await extension.beforeProviderRequest(payload);
+    expect(forced).toBeDefined();
+
+    const tool = extension.tools.find((t) => t.name === "update_card");
+    expect(tool).toBeDefined();
+    if (!tool) throw new Error("update_card tool missing");
+    await tool.execute(
+      "call-1",
+      { findings: [{ topic: "schema", detail: "no caps allowed" }] },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    // Activity reset to 0, so a single further read stays well below the
+    // threshold and forcing should not engage again yet.
+    await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    const notForcedYet = await extension.beforeProviderRequest(payload);
+    expect(notForcedYet).toBeUndefined();
+  });
+
   test("nudging stops after two consecutive misses rather than continuing forever", async () => {
     const extension = harness();
     await extension.start();
@@ -677,9 +780,11 @@ describe("Pi adapter", () => {
           timestamp: 2,
         },
       ] as AgentMessage[]);
-      const card = JSON.stringify(output?.messages[0]);
-      expect(card).toContain("what's pending: verify rebuild; rerun smoke");
-      expect(card).toContain(
+      // Pending/findings are volatile, so they render in the trailing
+      // status message, not the leading (cacheable) card message.
+      const status = JSON.stringify(output?.messages.at(-1));
+      expect(status).toContain("what's pending: verify rebuild; rerun smoke");
+      expect(status).toContain(
         "findings: schema: no caps allowed; scope: repo always present",
       );
     } finally {
@@ -717,6 +822,11 @@ describe("Pi adapter", () => {
   });
 
   test("filesRead reaches the rendered card as a flat line when present", async () => {
+    // A bare read with no later mutation stays "active" — and active
+    // entries are now omitted from the card entirely, since their content
+    // is already visible in the projected transcript. To exercise the
+    // rendered "files read:" line, follow the read with a write to the
+    // same path so the lease becomes "consumed".
     const cwd = await mkdtemp(path.join(tmpdir(), "context-card-files-"));
     const cardsDir = await mkdtemp(
       path.join(tmpdir(), "context-card-files-cards-"),
@@ -728,6 +838,7 @@ describe("Pi adapter", () => {
       await extension.start();
       await extension.input("Read src/a.ts");
       const readId = "read-1";
+      const writeId = "write-1";
       await extension.turnEnd({
         role: "assistant",
         content: [
@@ -748,9 +859,27 @@ describe("Pi adapter", () => {
       });
       await extension.turnEnd({
         role: "assistant",
-        content: [{ type: "text", text: "read a.ts" }],
-        stopReason: "stop",
+        content: [
+          {
+            type: "toolCall",
+            id: writeId,
+            name: "write",
+            arguments: { path: "src/a.ts", content: "v2" },
+          },
+        ],
+        stopReason: "toolUse",
         timestamp: 4,
+      } as unknown as AgentMessage);
+      await extension.toolExecutionEnd({
+        toolName: "write",
+        isError: false,
+        result: { content: [{ type: "text", text: "ok" }] },
+      });
+      await extension.turnEnd({
+        role: "assistant",
+        content: [{ type: "text", text: "read then wrote a.ts" }],
+        stopReason: "stop",
+        timestamp: 6,
       } as AgentMessage);
       const output = await extension.project([
         { role: "user", content: "Read src/a.ts", timestamp: 1 },
@@ -777,14 +906,38 @@ describe("Pi adapter", () => {
         },
         {
           role: "assistant",
-          content: [{ type: "text", text: "read a.ts" }],
-          stopReason: "stop",
+          content: [
+            {
+              type: "toolCall",
+              id: writeId,
+              name: "write",
+              arguments: { path: "src/a.ts", content: "v2" },
+            },
+          ],
+          stopReason: "toolUse",
           timestamp: 4,
         },
+        {
+          role: "toolResult",
+          toolCallId: writeId,
+          toolName: "write",
+          isError: false,
+          content: [{ type: "text", text: "ok" }],
+          timestamp: 5,
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "read then wrote a.ts" }],
+          stopReason: "stop",
+          timestamp: 6,
+        },
       ] as AgentMessage[]);
-      const card = JSON.stringify(output?.messages[0]);
-      // The card should mention at least one file read with state field.
-      expect(card).toMatch(/files read: .+ \((active|consumed)\)/);
+      // filesRead is volatile, so it renders in the trailing status
+      // message, not the leading (cacheable) card message.
+      const status = JSON.stringify(output?.messages.at(-1));
+      // The read is now consumed by the later write on the same path, so
+      // it's the one case where the card is expected to mention it.
+      expect(status).toMatch(/files read: .+ \(consumed\)/);
     } finally {
       if (previousEnv === undefined)
         delete process.env.AGENT_CONTEXT_CARD_TEST_CARDS_DIR;

@@ -1,4 +1,5 @@
 export const CARD_MESSAGE_TYPE = "agent-context-card";
+export const STATUS_MESSAGE_TYPE = "agent-context-card-status";
 export const CARD_NUDGE_MESSAGE_TYPE = "agent-context-card-nudge";
 export const ANCHOR_ENTRY_TYPE = "agent-context-card-anchor";
 export const AUDIT_ENTRY_TYPE = "agent-context-card-audit";
@@ -104,6 +105,8 @@ export interface RuntimeCard {
 export interface CardFinding {
   topic: string;
   detail: string;
+  // Paths this finding distills; citing one lets its raw read retire.
+  sources?: string[];
 }
 
 export interface CardState {
@@ -151,7 +154,8 @@ export interface TaskSnapshot {
 }
 
 export interface TaskStateAudit {
-  operation: "load" | "save" | "close" | "gc" | "session" | "resume-check" | "forcing";
+  operation:
+    "load" | "save" | "close" | "gc" | "session" | "resume-check" | "forcing";
   status: "success" | "missing" | "corrupt" | "failed" | "info" | "skipped";
   taskId?: string;
   detail?: string;
@@ -175,6 +179,8 @@ export interface RetirementCounts {
   staleRead: number;
   completedTurn: number;
   checkpoint: number;
+  findingConsumed: number;
+  disused: number;
 }
 
 export interface ProjectionResult<TRaw = unknown> {
@@ -195,6 +201,7 @@ export interface ProjectionAudit {
   estimatedProjectedTokens: number;
   projectedWindowPercent?: number;
   cardChars: number;
+  statusChars: number;
   originalMessages: number;
   projectedMessages: number;
   originalChars: number;

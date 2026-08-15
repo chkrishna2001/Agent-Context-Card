@@ -208,6 +208,134 @@ function consumedReads<TRaw>(
   return consumed;
 }
 
+// Paths an update_card call's findings cite as sources, so a raw read of
+// that path can retire once the distilling finding has survived a round.
+function findingSources(call: ToolCall): string[] {
+  if (!isUpdateCardCall(call)) return [];
+  const findings = call.arguments.findings;
+  if (!Array.isArray(findings)) return [];
+  const paths: string[] = [];
+  for (const finding of findings) {
+    if (!finding || typeof finding !== "object") continue;
+    const sources = (finding as { sources?: unknown }).sources;
+    if (!Array.isArray(sources)) continue;
+    for (const source of sources) {
+      if (typeof source === "string") paths.push(source);
+    }
+  }
+  return paths;
+}
+
+function consumedByFinding<TRaw>(
+  messages: ContextMessage<TRaw>[],
+  currentTurnText: string | null = null,
+): Set<number> {
+  const results = resultMap(messages);
+  const allRounds = rounds(messages);
+  const consumed = new Set<number>();
+
+  for (const round of allRounds) {
+    const reads = round.calls
+      .filter(isRead)
+      .filter((call) => successful(call, results));
+    if (!reads.length) continue;
+    const citation = allRounds.find(
+      (candidate) =>
+        candidate.index > round.index &&
+        candidate.calls.some(
+          (call) =>
+            successful(call, results) &&
+            findingSources(call).some((path) =>
+              reads.some((read) => filePath(read.arguments) === path),
+            ),
+        ),
+    );
+    if (!citation) continue;
+    const graceObserved = allRounds.some(
+      (candidate) =>
+        candidate.index > citation.index &&
+        candidate.calls.some((call) => successful(call, results)),
+    );
+    if (graceObserved) {
+      if (currentTurnText && hasReferenceOverlap(round, currentTurnText)) {
+        continue;
+      }
+      consumed.add(round.index);
+    }
+  }
+  return consumed;
+}
+
+// Whether any assistant-authored content after `index` engages with `path`
+// again: its own later text, a later tool call's resolved file path, or a
+// later tool call's raw arguments (covers a bash command or grep pattern
+// naming the file without it being the call's structured "path" argument).
+// Deliberately excludes toolResult text - that's not agent-authored, and a
+// huge unrelated result coincidentally containing the path string would be
+// a false signal of continued relevance, not genuine re-engagement.
+function referencedAfter<TRaw>(
+  messages: ContextMessage<TRaw>[],
+  index: number,
+  path: string,
+): boolean {
+  const needle = path.toLowerCase();
+  for (let i = index + 1; i < messages.length; i++) {
+    const message = messages[i];
+    if (!message || message.role !== "assistant") continue;
+    if (message.text && message.text.toLowerCase().includes(needle))
+      return true;
+    for (const call of message.toolCalls ?? []) {
+      if (filePath(call.arguments) === path) return true;
+      if (JSON.stringify(call.arguments).toLowerCase().includes(needle))
+        return true;
+    }
+  }
+  return false;
+}
+
+// A read nothing ever comes back to: no later mutation (consumedReads
+// already covers that), no later finding citation (consumedByFinding
+// already covers that), and no later assistant text or tool call mentions
+// its path at all. Unlike a round-count cutoff, this has no magic
+// threshold and is recomputed fresh against the full transcript on every
+// request - if the agent genuinely returns to the path in a later round,
+// referencedAfter flips true and the read stops being disuse-eligible, so
+// nothing that's actually back in use stays retired.
+function consumedByDisuse<TRaw>(
+  messages: ContextMessage<TRaw>[],
+  currentTurnText: string | null = null,
+): Set<number> {
+  const results = resultMap(messages);
+  const allRounds = rounds(messages);
+  const consumed = new Set<number>();
+
+  for (const round of allRounds) {
+    const reads = round.calls
+      .filter(isRead)
+      .filter((call) => successful(call, results));
+    if (!reads.length) continue;
+    // Mirrors the graceObserved check in consumedReads/consumedByFinding: a
+    // failed later call isn't genuine subsequent activity, so it can't be
+    // the grace round that lets this read be judged abandoned.
+    const graceObserved = allRounds.some(
+      (candidate) =>
+        candidate.index > round.index &&
+        candidate.calls.some((call) => successful(call, results)),
+    );
+    if (!graceObserved) continue;
+    const stillEngaged = reads.some((read) => {
+      const path = filePath(read.arguments);
+      return !path || referencedAfter(messages, round.index, path);
+    });
+    if (stillEngaged) continue;
+    if (currentTurnText && hasReferenceOverlap(round, currentTurnText)) {
+      continue;
+    }
+    consumed.add(round.index);
+  }
+  return consumed;
+}
+
 function fingerprint(calls: ToolCall[]): string {
   return JSON.stringify(
     calls.map((call) => ({ name: call.name, arguments: call.arguments })),
@@ -313,8 +441,27 @@ function projectTurn<TRaw>(
 
   const discovery = consumedDiscovery(messages, currentTurnText);
   const staleReads = consumedReads(messages, currentTurnText);
+  const findingConsumed = consumedByFinding(messages, currentTurnText);
+  const disused = consumedByDisuse(messages, currentTurnText);
+  // activeRounds is the caller's global-truth view of this same slice
+  // (computed once, up front, over the FULL transcript, then index-shifted
+  // to this slice - see turnActiveRounds/prefixActive/suffixActive). Local
+  // recomputation above only sees this slice, so a round whose sole later
+  // reference lives outside it (e.g. across a checkpoint's prefix/suffix
+  // split, or in a different kept turn) can look orphaned here even though
+  // the global computation - which saw that later reference - correctly
+  // judged it still active. Membership in activeRounds therefore overrides
+  // a local exclusion: it can only ever ADD back a round the global pass
+  // already vouched for, never exclude one the local pass would have kept,
+  // so intentional retirement for rounds where local and global agree
+  // (the common case) is untouched.
   const candidates = rounds(messages).filter(
-    (round) => !discovery.has(round.index) && !staleReads.has(round.index),
+    (round) =>
+      activeRounds.has(round.index) ||
+      (!discovery.has(round.index) &&
+        !staleReads.has(round.index) &&
+        !findingConsumed.has(round.index) &&
+        !disused.has(round.index)),
   );
   if (!candidates.length) return messages;
 
@@ -349,6 +496,8 @@ function projectionDetails<TRaw>(
   original: ContextMessage<TRaw>[],
   projected: ContextMessage<TRaw>[],
   checkpointIndex: number | undefined = undefined,
+  findingConsumedIndices: Set<number> = new Set(),
+  disusedIndices: Set<number> = new Set(),
 ): { retired: RetirementCounts; hotEvidence: EvidenceLease[] } {
   const keptIds = new Set(
     projected.flatMap(
@@ -367,6 +516,8 @@ function projectionDetails<TRaw>(
     staleRead: 0,
     completedTurn: 0,
     checkpoint: 0,
+    findingConsumed: 0,
+    disused: 0,
   };
 
   for (const [index, message] of original.entries()) {
@@ -380,12 +531,18 @@ function projectionDetails<TRaw>(
     } else if (calls.every(isDiscovery)) {
       retired.discovery++;
     } else if (calls.some(isRead)) {
-      // Reads not in the projected set: either stale (mutation happened
-      // with the grace boundary), kept under activeRounds, or collapsed
-      // by the checkpoint. Distinguish collapsed-by-checkpoint reads
-      // (everything before the checkpoint while warm-equipment reads
-      // were not in activeRounds) from explicit staleRead counts.
-      if (
+      // Reads not in the projected set: cited by a later finding, never
+      // referenced again by anything, stale (mutation happened with the
+      // grace boundary), kept under activeRounds, or collapsed by the
+      // checkpoint. The two specific automatic/agent-driven reasons are
+      // checked first - a read either of them explains may also sit
+      // before a checkpoint boundary, and that's still the more specific
+      // reason, not a generic checkpoint collapse.
+      if (findingConsumedIndices.has(index)) {
+        retired.findingConsumed++;
+      } else if (disusedIndices.has(index)) {
+        retired.disused++;
+      } else if (
         checkpointIndex !== undefined &&
         index < checkpointIndex &&
         !isInActiveRounds(original, index)
@@ -415,9 +572,10 @@ function projectionDetails<TRaw>(
     const consumed = calls.some(
       (candidate) =>
         candidate.index > index &&
-        isMutation(candidate.call) &&
-        filePath(candidate.call.arguments) === path &&
-        successful(candidate.call, results),
+        successful(candidate.call, results) &&
+        ((isMutation(candidate.call) &&
+          filePath(candidate.call.arguments) === path) ||
+          findingSources(candidate.call).includes(path)),
     );
     latestReads.set(path, {
       path,
@@ -481,6 +639,8 @@ export function projectContext<TRaw>(
         staleRead: 0,
         completedTurn: 0,
         checkpoint: 0,
+        findingConsumed: 0,
+        disused: 0,
       },
       hotEvidence: [],
     };
@@ -491,11 +651,15 @@ export function projectContext<TRaw>(
     messages.filter((m) => m.role === "user").slice(-1)[0]?.text ?? null;
   const globalDiscovery = consumedDiscovery(messages, currentTurnText);
   const globalStaleReads = consumedReads(messages, currentTurnText);
+  const globalFindingConsumed = consumedByFinding(messages, currentTurnText);
+  const globalDisused = consumedByDisuse(messages, currentTurnText);
   const activeRounds = new Set<number>();
   for (const round of rounds(messages)) {
     if (
       !globalDiscovery.has(round.index) &&
-      !globalStaleReads.has(round.index)
+      !globalStaleReads.has(round.index) &&
+      !globalFindingConsumed.has(round.index) &&
+      !globalDisused.has(round.index)
     ) {
       activeRounds.add(round.index);
     }
@@ -546,6 +710,8 @@ export function projectContext<TRaw>(
     messages,
     projected,
     checkpointRoundIndexGlobal,
+    globalFindingConsumed,
+    globalDisused,
   );
   return {
     messages: projected.map((message) => message.raw),
