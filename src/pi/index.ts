@@ -821,6 +821,26 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         cardNudgeStreak = 0;
         forceNudgeStreak = 0;
       }
+      if (wasForced) {
+        // tool_choice forcing pins the model's entire response to this one
+        // call, which cuts off whatever it was mid-way through doing. Left
+        // alone, the next generation reliably treated that interruption as
+        // a wrap-up cue - writing its plan out in prose and stopping,
+        // exactly where it would otherwise have moved to edit/write calls
+        // (confirmed against a live trace: a full, correct patch plan
+        // narrated in text, then stopReason "stop", never an edit). Steer
+        // it back to acting in the same breath the forced call resolves,
+        // before the model gets a free-choice turn to decide it's done.
+        pi.sendMessage(
+          {
+            customType: CARD_NUDGE_MESSAGE_TYPE,
+            content:
+              "That update_card call was compelled by the harness, not a natural stopping point - it does not mean the task is done. Resume exactly what you were doing before it. If you now have a concrete fix in mind, make it with an edit/apply_patch/write call instead of only describing it in text.",
+            display: false,
+          },
+          { deliverAs: "steer" },
+        );
+      }
       return {
         content: [{ type: "text", text: "Card updated." }],
         details: {},

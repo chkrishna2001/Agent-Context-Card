@@ -703,6 +703,97 @@ describe("Pi adapter", () => {
     expect(notForcedYet).toBeUndefined();
   });
 
+  test("a forced update_card call steers the model back to acting, whether thin or substantive", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 11; index += 1) {
+      await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    }
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const forced = await extension.beforeProviderRequest(payload);
+    expect(forced).toBeDefined();
+
+    const tool = extension.tools.find((t) => t.name === "update_card");
+    expect(tool).toBeDefined();
+    if (!tool) throw new Error("update_card tool missing");
+    // Thin forced response: tool_choice compelled the call, but there's
+    // nothing substantive in it - the model was still cut off mid-task and
+    // still needs steering back to acting, not just its own next free turn.
+    await tool.execute("call-1", {}, undefined, undefined, {} as any);
+
+    const steerCalls = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(steerCalls.length).toBe(1);
+  });
+
+  test("a forced substantive update_card call also steers the model back to acting", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 11; index += 1) {
+      await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    }
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const forced = await extension.beforeProviderRequest(payload);
+    expect(forced).toBeDefined();
+
+    const tool = extension.tools.find((t) => t.name === "update_card");
+    expect(tool).toBeDefined();
+    if (!tool) throw new Error("update_card tool missing");
+    // Substantive forced response - the trace this fix was built from had
+    // exactly this shape (real content, forced call) and the model still
+    // stopped afterward instead of executing its own stated plan.
+    await tool.execute(
+      "call-1",
+      { findings: [{ topic: "schema", detail: "no caps allowed" }] },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    const steerCalls = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(steerCalls.length).toBe(1);
+  });
+
+  test("a voluntary (non-forced) update_card call does not send the extra steer nudge", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    const tool = extension.tools.find((t) => t.name === "update_card");
+    expect(tool).toBeDefined();
+    if (!tool) throw new Error("update_card tool missing");
+    await tool.execute(
+      "call-1",
+      { findings: [{ topic: "schema", detail: "no caps allowed" }] },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    const steerCalls = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(steerCalls.length).toBe(0);
+  });
+
   test("nudging stops after two consecutive misses rather than continuing forever", async () => {
     const extension = harness();
     await extension.start();

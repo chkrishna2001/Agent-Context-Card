@@ -511,3 +511,73 @@ reference-overlap idea above) as the real backstop. That reconciles both
 branches' philosophies instead of picking one: try agent self-report,
 tightly triggered and validated; if it doesn't deliver, the automatic
 mechanism doesn't care whether the agent cooperated.
+
+## 2026-08-15: root-caused the sympy-21930 empty patch - one real bug found and fixed, one deeper problem left honestly unresolved
+
+The second pilot's raw trace was gone (scratch directory, cleaned up before
+this thread picked back up), so re-ran the card variant alone
+(`--variant card`, same pinned model/thinking) twice to get real evidence
+instead of continuing to theorize from the writeup above.
+
+**First re-run, trace inspected directly (DuckDB over the JSONL, per
+[[feedback_duckdb_for_jsonl]]):** found the actual mechanism, not just the
+symptom. `before_provider_request`'s `tool_choice` forcing pins the model's
+entire next response to a single `update_card` call - no other tool calls
+possible in that response. In the captured trace, the model had just read
+`secondquant.py` and was actively investigating when forcing hit. Its
+argument-generation partially broke under the constraint (reasoning text
+leaked into the `pending` array instead of staying in a separate channel -
+schema-valid because the field is just `string[]`, so it "succeeded"
+anyway). Worse: its very next (free-choice) response was a complete,
+*correct* patch plan - "modify `_print_Pow` in `sympy/printing/latex.py` to
+brace the base when it's a daggered operator" - written entirely as prose,
+then `stopReason: "stop"`. Never called `edit`. The forced interruption
+reads to this model like a wrap-up cue it doesn't recover from.
+
+**Fix:** `update_card`'s `execute()` now sends a `steer` message
+immediately after a *forced* call resolves (thin or substantive - both
+branches derailed in testing), explicitly telling the model the
+interruption wasn't a stopping point and to resume acting - "if you now
+have a concrete fix in mind, make it with an edit/apply_patch/write call
+instead of only describing it in text." `pi.sendMessage(..., {deliverAs:
+"steer"})` from inside a tool's `execute()` queues for delivery before the
+model's *next* generation while the agent is still mid-turn (confirmed
+against `pi-coding-agent`'s own docs, not assumed) - the exact point where
+the derailment happened. 3 new tests (forced+thin, forced+substantive,
+voluntary-call-gets-no-extra-nudge), fault-injection confirmed (commented
+out the new branch, both positive tests failed as expected, the negative
+one didn't, restored). 113/113 passing, tsc/eslint clean.
+
+**Second re-run, fix live, same config:** the targeted mechanism is
+confirmed fixed. Forcing fired again in the implement turn (same
+activity=11/streak=1 shape), landed with real content this time, and -
+this is the change - the model kept working afterward (a further
+exploratory `bash` call) instead of immediately stopping. That specific
+derailment point no longer derails.
+
+**Honest result: still an empty patch.** A second, different failure
+surfaced instead, and it is *not* forcing-related - no forcing fired
+anywhere near it. In the implement turn (prompt: "Implement ... Inspect
+current source before editing"), after hitting an unrelated `rg` syntax
+error, the model's own thinking read "For now, I won't edit any files but
+will suggest targeted searches using grep instead," and its final text
+ended with "If you want, I can provide a precise code edit plan (targeted
+diffs) once you confirm you want me to proceed with editing the relevant
+latex.py sections." It's asking a user that will never answer in a `-p`
+batch harness for permission to edit. Same shape recurred in the review
+turn on the same run (thinking: "I'll focus on recommending changes
+without implementing them directly").
+
+This reads as a general confirmation-seeking/caution posture in this
+specific cheap, pinned model (`openrouter-pinned/openai/gpt-5-nano`,
+`thinking: low`) - triggered here by a tool error, present with or without
+forcing in play, and consistent with the very first EstimateStudio
+observation months back ("Looked like plain analysis-paralysis... Not
+caused by the card"). Baseline resolved this exact instance's implement
+turn today with the same model, so it isn't unconditional - but nothing
+in the card's own mechanism explains why baseline pushes through and card
+sometimes doesn't beyond the one bug just fixed. Didn't chase this further:
+it looks like an agent-autonomy/system-prompt framing question (does the
+model believe a user is present to confirm with), not a context-lifecycle
+one, and doesn't have an obvious fix inside this extension's actual job.
+Recording it here rather than guessing at a patch for it.
