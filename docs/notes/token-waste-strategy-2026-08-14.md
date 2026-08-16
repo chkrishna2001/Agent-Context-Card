@@ -74,7 +74,7 @@ consumption and finding-citation are two specific instances of "this got
 used." A third, more general instance is already sitting unexploited in the
 transcript: `hasReferenceOverlap`/`terms()` (in `projection.ts`) already
 computes whether text overlaps with a piece of evidence — today it's only
-ever pointed at the *current* live turn's text, to decide whether to *exempt*
+ever pointed at the _current_ live turn's text, to decide whether to _exempt_
 something from retirement. Pointed forward across the whole transcript
 instead, it becomes a deterministic, zero-extra-calls signal of
 non-engagement: did any later assistant text, tool call, or finding ever
@@ -94,7 +94,7 @@ right there as exactly that kind of real material.
 
 ## main vs. this branch, checked directly in code (not assumed)
 
-`main` already had the context card *and* the projection engine before this
+`main` already had the context card _and_ the projection engine before this
 branch existed — `format.ts`/`RuntimeCard` are not new. What main's
 `RuntimeCard` does NOT have: `findings`, `filesRead`/`hotEvidence`. Main's
 projection.ts has no `isUpdateCardCall`, no checkpoint mechanism, no
@@ -110,7 +110,7 @@ This branch (`bc9bbf3` "Add self-maintained context card: agent-declared
 findings replace guesswork", plus `e7b46ff` forcing it via tool_choice)
 adds a genuinely different bet on top of the same base engine: let the
 agent self-report conclusions (`findings`, now `sources`) via `update_card`,
-and let those self-reports both stand in for retired evidence *and* (via
+and let those self-reports both stand in for retired evidence _and_ (via
 the checkpoint mechanism) trigger more aggressive collapse of everything
 before them. This is additive — main's mechanisms are all still running
 underneath — but the branch's whole thesis rests on the agent actually
@@ -121,7 +121,7 @@ well it works.** `CARD_ACTIVITY_NUDGE_THRESHOLD = 10` triggers a soft nudge;
 if unanswered, `tryForceUpdateCardToolCall` forces the tool via
 `tool_choice`, capped at `CARD_NUDGE_STREAK_CAP = 2` before backing off
 until the next successful call resets it. Across the two live sessions run
-*after* `sources` existed (`b198b128`, `f6e27b58`), `update_card` WAS
+_after_ `sources` existed (`b198b128`, `f6e27b58`), `update_card` WAS
 called (2x, 1x) — the forcing works, in the sense that the tool gets
 invoked. But the content was thin every time: one call carried
 `findings: []`, another only `pending`, none carried `sources`. **Forcing
@@ -139,7 +139,7 @@ reliably get it even when forced). It wouldn't have to replace anything —
 it could sit alongside `consumedByFinding` as a third trigger in the same
 family. But the real strategic question it raises: given three live trials
 never produced a populated `sources` field even with forcing active, should
-agent self-reporting remain the *primary* mechanism this branch is betting
+agent self-reporting remain the _primary_ mechanism this branch is betting
 on, or should it become an opportunistic bonus layered on an automatic
 safety net that works with or without the agent's cooperation?
 
@@ -147,13 +147,14 @@ safety net that works with or without the agent's cooperation?
 
 **Branch thesis, stated precisely:** send the context card on every LLM
 call, split into two messages for prompt-caching:
+
 1. Constant: goal, project info — rarely changes, should stay cache-hit
    across many requests.
 2. Variable: findings, reads, sources — changes often, currently forces a
    full-card re-hash (and cache miss for everything after it) on every
    change, because `formatContextCard` emits one monolithic string today.
-This is a real, concrete, currently-unaddressed cost problem, independent
-of the summarization debate below — worth doing regardless.
+   This is a real, concrete, currently-unaddressed cost problem, independent
+   of the summarization debate below — worth doing regardless.
 
 **The deeper question raised:** the card doesn't have to be pure
 determinism-or-raw-evidence; there could be a summary in the card in place
@@ -161,31 +162,31 @@ of raw messages, without depending on the primary agent volunteering it via
 `update_card`. Three mechanisms proposed:
 
 a. **A separate background LLM call** that looks at about-to-retire
-   evidence and writes the summary, mechanically inserted into the card.
-   This is the same tradeoff class as two of the README's own explicitly
-   *rejected* alternatives, just moved to a different call site: it's
-   "model-maintained memory" (an extra call whose only job is bookkeeping)
-   and it risks "summaries can drop exact implementation details" (the
-   README's first listed reason for not doing this at all). Not free —
-   extra latency, extra cost, and a sync problem (if it's async, is the raw
-   evidence already gone by the time the summary lands?). Worth exploring,
-   but it's a bigger philosophical reversal than it looks like at a glance.
+evidence and writes the summary, mechanically inserted into the card.
+This is the same tradeoff class as two of the README's own explicitly
+_rejected_ alternatives, just moved to a different call site: it's
+"model-maintained memory" (an extra call whose only job is bookkeeping)
+and it risks "summaries can drop exact implementation details" (the
+README's first listed reason for not doing this at all). Not free —
+extra latency, extra cost, and a sync problem (if it's async, is the raw
+evidence already gone by the time the summary lands?). Worth exploring,
+but it's a bigger philosophical reversal than it looks like at a glance.
 
 b. **Piggyback a synthesis field onto the turn that already consumes the
-   tool output** — no separate call, folded into the primary agent's next
-   response. Structurally the most promising: stays inside "no extra model
-   calls," and can reuse the `tryForceUpdateCardToolCall` infrastructure
-   that already exists and already works *at the form level* — just
-   retarget the trigger from "10 turns of inactivity" (proven too generic —
-   3-for-3 empty `sources` even when forced) to "you just read something
-   costly, before you do anything else." A specific, freshly-relevant ask
-   is more likely to get a real answer than a periodic nag that's easy to
-   satisfy with `findings: []`.
+tool output** — no separate call, folded into the primary agent's next
+response. Structurally the most promising: stays inside "no extra model
+calls," and can reuse the `tryForceUpdateCardToolCall` infrastructure
+that already exists and already works _at the form level_ — just
+retarget the trigger from "10 turns of inactivity" (proven too generic —
+3-for-3 empty `sources` even when forced) to "you just read something
+costly, before you do anything else." A specific, freshly-relevant ask
+is more likely to get a real answer than a periodic nag that's easy to
+satisfy with `findings: []`.
 
 c. **A small classifier/summarizer model.** User's own read, which matches
-   mine: limited capacity for large/complex content, and it's the exact
-   "summaries can drop exact implementation details" risk the README
-   already named as a reason to avoid this path. Lowest priority.
+mine: limited capacity for large/complex content, and it's the exact
+"summaries can drop exact implementation details" risk the README
+already named as a reason to avoid this path. Lowest priority.
 
 **Done:** hand-ported and extended the split. `formatContextCard` now emits
 only the stable header (goal, taskId, latestRequest, project, repo, plan,
@@ -215,14 +216,14 @@ including a pre-existing checkpoint one, restored it).
 
 Hit a real, subtle interaction while building it, worth remembering: local
 recomputation inside `projectTurn` is blind to anything outside whatever
-slice it's given, so a read in a checkpoint's *prefix* whose only later
-reference lives in the checkpoint's *suffix* looked "never referenced
+slice it's given, so a read in a checkpoint's _prefix_ whose only later
+reference lives in the checkpoint's _suffix_ looked "never referenced
 again" to the local computation even though the global one knew better.
 This is a pre-existing architectural property (the same blindness already
 affected `consumedReads`/`consumedByFinding`, just usually hidden because
 mutation/citation triggers are rarer than plain disuse), not something
 introduced by this change — but disuse is far more sensitive to it, since
-it requires *positive* evidence of continued use rather than a specific
+it requires _positive_ evidence of continued use rather than a specific
 trigger event. Fixed the immediately-visible test fallout (some fixtures
 needed a legitimate later reference to isolate what they were actually
 testing; one test's original assertion turned out to depend on the
@@ -234,6 +235,7 @@ to take on inside this change.
 
 **Done: step 2 (tighten the forcing trigger + validate substance).** Two
 changes to `src/pi/index.ts`:
+
 - A read over `COSTLY_READ_CHARS` (4000 chars) now pushes
   `cardActivitySinceUpdate` straight past the nudge/force threshold instead
   of waiting for ~10 generic activity units to accumulate — reuses the
@@ -243,7 +245,7 @@ changes to `src/pi/index.ts`:
   caught — `messageText` assumes a defined object).
 - `update_card`'s `execute()` now checks whether the response has real
   substance (a non-empty `pending` item, or a finding with non-empty
-  `detail`) whenever it's answering a *forced* call (tracked via a new
+  `detail`) whenever it's answering a _forced_ call (tracked via a new
   `awaitingForcedSubstance` flag set right when `tryForceUpdateCardToolCall`
   actually forces). A thin forced response no longer resets
   `cardActivitySinceUpdate`/`cardNudgeStreak`/`forceNudgeStreak` — forcing
@@ -306,7 +308,7 @@ User's framing, worth keeping verbatim: rejected going further down the
 "detect every possible read-like tool" path (correctly identified as the
 same whack-a-mole pattern as the earlier build-artifact-denylist idea I'd
 already talked myself out of once) in favor of treating a bash call and a
-dedicated read call as the same *kind* of event when they produce the same
+dedicated read call as the same _kind_ of event when they produce the same
 outcome - full file content entering context - regardless of which tool
 produced it. Floated a further idea (a canonical store the model reads
 from instead of the raw tool output) but self-identified it as edging into
@@ -365,16 +367,16 @@ pipe, but this machine's active context (`desktop-linux`) exposes
 
 **Officially graded result (Docker-verified, not self-reported):**
 
-| | Baseline | Card |
-| --- | --- | --- |
-| Resolved | **no** | **yes** |
-| FAIL_TO_PASS | 0/1 | 1/1 |
-| PASS_TO_PASS | 54/54 | 54/54 |
-| Provider input tokens | 883,089 | 209,778 (-76.2%) |
-| Requests | 27 | 18 (-33.3%) |
-| Tool calls | 24 | 15 (-37.5%) |
-| Tool errors | 9 | 3 (-62.5%) |
-| Duration | 119.7s | 81.1s (-32.2%) |
+|                       | Baseline | Card             |
+| --------------------- | -------- | ---------------- |
+| Resolved              | **no**   | **yes**          |
+| FAIL_TO_PASS          | 0/1      | 1/1              |
+| PASS_TO_PASS          | 54/54    | 54/54            |
+| Provider input tokens | 883,089  | 209,778 (-76.2%) |
+| Requests              | 27       | 18 (-33.3%)      |
+| Tool calls            | 24       | 15 (-37.5%)      |
+| Tool errors           | 9        | 3 (-62.5%)       |
+| Duration              | 119.7s   | 81.1s (-32.2%)   |
 
 The historical ledger entry for this exact instance (`gemma4:31b`, the
 now-removed `fresh`-session-bridge architecture) recorded the same
@@ -390,7 +392,7 @@ instance can give. One caveat worth being honest about: this instance
 didn't require much back-and-forth (a `-p` single-shot session did produce
 a working patch here, unlike every EstimateStudio trial), so it isn't
 direct evidence against the "ends with a plan instead of editing" pattern
-observed all day - just evidence that when a model *does* commit to
+observed all day - just evidence that when a model _does_ commit to
 editing, the card measurably helps.
 
 ## 2026-08-15: second pilot (sympy-21930) — two real harness bugs found and fixed, and an honest, less flattering result
@@ -401,7 +403,7 @@ reproducible, blocking):
 
 1. **`run.mjs` crashed the whole harness on a runaway tool call.** The
    model issued a malformed bash command (`bash -lc python -V && python -
-   << 'PY' ...` - mixing `-lc` with an unquoted heredoc chain), which
+<< 'PY' ...` - mixing `-lc` with an unquoted heredoc chain), which
    streamed continuously for the full 20-minute turn timeout. `run.mjs`
    unconditionally accumulated all child-process stdout in a single JS
    string (`stdout += chunk.toString()`); at ~537MB that exceeded V8's max
@@ -429,18 +431,18 @@ before the crash was diagnosed.
 
 **Result, honestly - this one does not repeat the clean win:**
 
-| | Baseline | Card |
-| --- | --- | --- |
-| Patch produced | yes (2754 bytes) | **no (empty)** |
-| Resolved | no | no |
-| FAIL_TO_PASS | 0/6 | 0/6 (no attempt) |
-| PASS_TO_PASS | 45/45 | n/a (not run) |
-| Provider input tokens | 360,584 | 169,157 (-53.1%) |
-| Requests | 21 | 9 (-57.1%) |
-| Tool calls | 18 | 6 (-66.7%) |
+|                       | Baseline         | Card             |
+| --------------------- | ---------------- | ---------------- |
+| Patch produced        | yes (2754 bytes) | **no (empty)**   |
+| Resolved              | no               | no               |
+| FAIL_TO_PASS          | 0/6              | 0/6 (no attempt) |
+| PASS_TO_PASS          | 45/45            | n/a (not run)    |
+| Provider input tokens | 360,584          | 169,157 (-53.1%) |
+| Requests              | 21               | 9 (-57.1%)       |
+| Tool calls            | 18               | 6 (-66.7%)       |
 
 Baseline's 0/6 matches the historical ledger entry for this exact instance
-exactly. But the historical *card* run got 5/6 FAIL_TO_PASS (close, not
+exactly. But the historical _card_ run got 5/6 FAIL_TO_PASS (close, not
 resolved) - today's card run made no attempt at all, ending with a fully
 empty patch despite six tool calls across implement and review. That's a
 real regression relative to the historical run on this specific instance,
@@ -459,7 +461,7 @@ Same pinned model, same clean baseline, run immediately after the bash-read
 fix (uncommitted but live, since the extension loads source directly).
 Zero edits again - fifth trial in a row without one - but context usage
 stayed dramatically bounded: ~20% of window by request 55, versus ~77% by
-request 27 last time, despite this run doing *more* work (25 bash + 15
+request 27 last time, despite this run doing _more_ work (25 bash + 15
 read + 10 update_card + 4 update_progress vs. last time's 26 bash + 1
 read + 1 update_card). `disused` climbed steadily to 5 over the session -
 the first time automatic disuse retirement has visibly engaged in a live
@@ -503,7 +505,7 @@ session addresses it.
 **Proposed synthesis (not yet agreed, still open):** tighten (b)'s trigger to fire
 immediately after a large/costly read rather than on a generic activity
 counter, and — this is the part that ties everything today together —
-*validate substance, not just form*: if a forced `update_card` still comes
+_validate substance, not just form_: if a forced `update_card` still comes
 back with empty `findings`/`sources`, don't reset the nudge streak as if it
 succeeded; either re-force or fall through to the automatic, non-cooperative
 signal (main's `consumedReads`-style mechanism, extended per the
@@ -529,19 +531,19 @@ argument-generation partially broke under the constraint (reasoning text
 leaked into the `pending` array instead of staying in a separate channel -
 schema-valid because the field is just `string[]`, so it "succeeded"
 anyway). Worse: its very next (free-choice) response was a complete,
-*correct* patch plan - "modify `_print_Pow` in `sympy/printing/latex.py` to
+_correct_ patch plan - "modify `_print_Pow` in `sympy/printing/latex.py` to
 brace the base when it's a daggered operator" - written entirely as prose,
 then `stopReason: "stop"`. Never called `edit`. The forced interruption
 reads to this model like a wrap-up cue it doesn't recover from.
 
 **Fix:** `update_card`'s `execute()` now sends a `steer` message
-immediately after a *forced* call resolves (thin or substantive - both
+immediately after a _forced_ call resolves (thin or substantive - both
 branches derailed in testing), explicitly telling the model the
 interruption wasn't a stopping point and to resume acting - "if you now
 have a concrete fix in mind, make it with an edit/apply_patch/write call
 instead of only describing it in text." `pi.sendMessage(..., {deliverAs:
 "steer"})` from inside a tool's `execute()` queues for delivery before the
-model's *next* generation while the agent is still mid-turn (confirmed
+model's _next_ generation while the agent is still mid-turn (confirmed
 against `pi-coding-agent`'s own docs, not assumed) - the exact point where
 the derailment happened. 3 new tests (forced+thin, forced+substantive,
 voluntary-call-gets-no-extra-nudge), fault-injection confirmed (commented
@@ -556,7 +558,7 @@ exploratory `bash` call) instead of immediately stopping. That specific
 derailment point no longer derails.
 
 **Honest result: still an empty patch.** A second, different failure
-surfaced instead, and it is *not* forcing-related - no forcing fired
+surfaced instead, and it is _not_ forcing-related - no forcing fired
 anywhere near it. In the implement turn (prompt: "Implement ... Inspect
 current source before editing"), after hitting an unrelated `rg` syntax
 error, the model's own thinking read "For now, I won't edit any files but
@@ -585,7 +587,7 @@ Recording it here rather than guessing at a patch for it.
 Reconsidered that last line immediately: pi's own `before_agent_start`
 event exists precisely to let extensions append to the system prompt per
 turn, and `ctx.hasUI` (true only in `tui`/`rpc` modes, per pi's own docs -
-false in `print`/`json`) is a *fact*, not a guess, about whether anyone
+false in `print`/`json`) is a _fact_, not a guess, about whether anyone
 could possibly answer a question. Checked pi's actual default system
 prompt (`system-prompt.js`) directly rather than assuming: it says "You
 help users by reading files, executing commands, editing code, and
@@ -627,7 +629,7 @@ exact input the Pow lands in `args[1]`, so the one-sided check misses it.
 Traced why the model's own review-turn self-test didn't catch this: it
 reproduced with `Bd(0)` (plain int) instead of `Bd(Symbol('0'))` (the
 actual issue's input), hit an unrelated `AttributeError`, patched around
-*that* crash, and declared done without ever re-running the real
+_that_ crash, and declared done without ever re-running the real
 reproduction case.
 
 Not chasing this one: getting the actual fix right, and thoroughly

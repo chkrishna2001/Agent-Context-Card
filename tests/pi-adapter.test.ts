@@ -91,7 +91,10 @@ function harness(
       let result: { systemPrompt?: string } | undefined;
       for (const handler of handlers.get("before_agent_start") ?? []) {
         const returned = await handler(
-          { prompt: "test", systemPrompt: result?.systemPrompt ?? systemPrompt },
+          {
+            prompt: "test",
+            systemPrompt: result?.systemPrompt ?? systemPrompt,
+          },
           context,
         );
         if (returned !== undefined) result = returned;
@@ -125,7 +128,12 @@ function harness(
         await handler({ toolCallId, toolName, args }, context);
       for (const handler of handlers.get("tool_execution_end") ?? [])
         await handler(
-          { toolCallId, toolName, isError: outcome.isError, result: outcome.result },
+          {
+            toolCallId,
+            toolName,
+            isError: outcome.isError,
+            result: outcome.result,
+          },
           context,
         );
     },

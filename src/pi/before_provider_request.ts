@@ -14,10 +14,12 @@ type OpenAIToolChoice = {
   };
 };
 
-export function tryForceUpdateCardToolCall(
-  payload: unknown,
-): unknown {
-  if (payload === undefined || payload === null || typeof payload !== "object") {
+export function tryForceUpdateCardToolCall(payload: unknown): unknown {
+  if (
+    payload === undefined ||
+    payload === null ||
+    typeof payload !== "object"
+  ) {
     return undefined;
   }
 
