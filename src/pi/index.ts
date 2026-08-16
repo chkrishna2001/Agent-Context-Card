@@ -433,6 +433,18 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     latestRequest = taskGoalFromInput(event.text);
     previousTurnSettled = false;
   });
+  pi.on("before_agent_start", (event, ctx) => {
+    // hasUI is false exactly when no dialog-capable UI exists for anyone to
+    // answer through (print/json/headless runs) - true in tui and rpc modes,
+    // where a real person genuinely might be on the other end. Only in the
+    // former case is "there is no user" actually a fact rather than a
+    // guess, so only append there - telling an interactive session there's
+    // no one to ask would be wrong, not just unnecessary.
+    if (ctx.hasUI) return undefined;
+    return {
+      systemPrompt: `${event.systemPrompt}\n\nThis session is running unattended: no user is available to answer questions or confirm actions before you take them. Once you've identified a fix, make it directly with the appropriate tool call rather than only describing it in text or asking whether to proceed.`,
+    };
+  });
   pi.on("tool_execution_end", (event) => {
     if (!event.isError && isMutationToolName(event.toolName))
       turnMutated = true;

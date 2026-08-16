@@ -581,3 +581,61 @@ it looks like an agent-autonomy/system-prompt framing question (does the
 model believe a user is present to confirm with), not a context-lifecycle
 one, and doesn't have an obvious fix inside this extension's actual job.
 Recording it here rather than guessing at a patch for it.
+
+Reconsidered that last line immediately: pi's own `before_agent_start`
+event exists precisely to let extensions append to the system prompt per
+turn, and `ctx.hasUI` (true only in `tui`/`rpc` modes, per pi's own docs -
+false in `print`/`json`) is a *fact*, not a guess, about whether anyone
+could possibly answer a question. Checked pi's actual default system
+prompt (`system-prompt.js`) directly rather than assuming: it says "You
+help users by reading files, executing commands, editing code, and
+writing new files" - interactive-assistant framing, no mention anywhere
+that a batch/headless run has no one to ask. That gap is real and
+in-scope: it's exactly what the captured trace showed the model act on
+("once you confirm you want me to proceed with editing").
+
+**Fix:** new `before_agent_start` handler in `src/pi/index.ts` appends an
+explicit note - "no user is available to answer questions or confirm
+actions... make it directly with the appropriate tool call rather than
+only describing it or asking whether to proceed" - but only when
+`!ctx.hasUI`, so an interactive session is never told there's no one
+listening when there is. Confirmed the gate is correct for how the eval
+harness actually runs pi (`--mode json --print`) by reading
+`extensions/runner.js` directly: `hasUI()` returns `uiContext !==
+noOpUIContext`, and `print-mode.js` never calls `setUIContext` to
+override the constructor's `noOpUIContext` default - so `hasUI` really is
+false in exactly the harness's invocation mode, not assumed. 2 new tests
+(note appended when `hasUI: false`, untouched when `hasUI: true`),
+fault-injection confirmed. 115/115 passing, tsc/eslint clean.
+
+**Third re-run, both fixes live:** first non-empty patch across every card
+trial today. The model edited `sympy/physics/secondquant.py` directly
+instead of stopping at a plan - both structural fixes are doing their job.
+
+Didn't stop at "a diff exists," though - ran the actual reproduction
+against the patched tree instead of reading the diff and calling it done:
+
+```
+latex(Commutator(Bd(Symbol('0'))**2, B(Symbol('0'))))
+-> "- \left[b_{0},b^\dagger_{0}^{2}\right]"
+```
+
+Still unbraced. The model's fix checked `isinstance(a0, Pow)` assuming the
+daggered operator stays in `Commutator`'s `args[0]`, but SymPy
+canonicalizes/reorders commutator arguments (with a sign flip) - for this
+exact input the Pow lands in `args[1]`, so the one-sided check misses it.
+Traced why the model's own review-turn self-test didn't catch this: it
+reproduced with `Bd(0)` (plain int) instead of `Bd(Symbol('0'))` (the
+actual issue's input), hit an unrelated `AttributeError`, patched around
+*that* crash, and declared done without ever re-running the real
+reproduction case.
+
+Not chasing this one: getting the actual fix right, and thoroughly
+self-verifying against the real repro rather than a nearby one that
+happens to run clean, is model reasoning quality - not a context-lifecycle
+mechanism this extension owns. Consistent with baseline's own historical
+0/6 on this exact instance: a genuinely hard bug (canonicalized commutator
+argument order isn't obvious), not evidence the card regressed anything.
+Both fixes this session are validated at what they were built to fix - the
+model now attempts real edits instead of stopping short. Whether it gets
+the answer right is a separate axis this extension doesn't control.

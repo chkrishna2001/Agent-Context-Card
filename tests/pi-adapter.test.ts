@@ -21,7 +21,10 @@ import { scopeMessagesToGoal } from "../src/pi/normalize";
 
 type Handler = (...args: any[]) => any;
 
-function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
+function harness(
+  cwd = process.cwd(),
+  options: { sessionId?: string; hasUI?: boolean } = {},
+) {
   const flags = new Map<string, string | boolean>();
   const handlers = new Map<string, Handler[]>();
   const tools: ToolDefinition[] = [];
@@ -55,6 +58,7 @@ function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
     },
     model: { provider: "test", id: "model", contextWindow: 128_000 },
     ui: { setStatus() {}, notify() {} },
+    hasUI: options.hasUI ?? true,
   } as unknown as ExtensionContext;
   return {
     tools,
@@ -82,6 +86,17 @@ function harness(cwd = process.cwd(), options: { sessionId?: string } = {}) {
         type: "message",
         message: { role: "user", content: text, timestamp: Date.now() },
       });
+    },
+    async beforeAgentStart(systemPrompt: string) {
+      let result: { systemPrompt?: string } | undefined;
+      for (const handler of handlers.get("before_agent_start") ?? []) {
+        const returned = await handler(
+          { prompt: "test", systemPrompt: result?.systemPrompt ?? systemPrompt },
+          context,
+        );
+        if (returned !== undefined) result = returned;
+      }
+      return result;
     },
     async toolExecutionEnd(event: {
       toolName: string;
@@ -701,6 +716,22 @@ describe("Pi adapter", () => {
     await extension.toolExecutionEnd({ toolName: "read", isError: false });
     const notForcedYet = await extension.beforeProviderRequest(payload);
     expect(notForcedYet).toBeUndefined();
+  });
+
+  test("before_agent_start appends an unattended-session note when no UI is available", async () => {
+    const extension = harness(process.cwd(), { hasUI: false });
+    await extension.start();
+    const result = await extension.beforeAgentStart("Base system prompt.");
+    expect(result).toBeDefined();
+    expect(result?.systemPrompt).toContain("Base system prompt.");
+    expect(result?.systemPrompt).toContain("running unattended");
+  });
+
+  test("before_agent_start leaves the system prompt untouched when a UI is available", async () => {
+    const extension = harness(process.cwd(), { hasUI: true });
+    await extension.start();
+    const result = await extension.beforeAgentStart("Base system prompt.");
+    expect(result).toBeUndefined();
   });
 
   test("a forced update_card call steers the model back to acting, whether thin or substantive", async () => {
