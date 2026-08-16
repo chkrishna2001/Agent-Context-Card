@@ -75,6 +75,10 @@ const CARD_NUDGE_STREAK_CAP = 2;
 // pointed reason to ask now rather than waiting for the generic activity
 // counter to catch up.
 const COSTLY_READ_CHARS = 4000;
+// Two consecutive failures of the exact same call is already unambiguous -
+// a deterministic tool re-run against an unchanged repo can't succeed the
+// second time just because it's asked again.
+const REPEATED_FAILURE_NUDGE_THRESHOLD = 2;
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value), 10);
@@ -127,6 +131,18 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   // content, so a thin response shouldn't reset the streaks as if it had
   // resolved anything.
   let awaitingForcedSubstance = false;
+  // Signature (tool name + arguments) of the most recent tool call args
+  // seen at tool_execution_start, keyed by call id so tool_execution_end -
+  // which carries no args of its own - can look up what actually ran.
+  const pendingCallSignatures = new Map<string, string>();
+  // Tracks a call that just failed with the exact same signature as the
+  // one immediately before it - a model stuck repeating a broken command
+  // verbatim rather than adjusting. Resets on any success or on a
+  // differently-signatured failure, so it only fires on genuine
+  // back-to-back repetition, never accumulated tolerance across a session.
+  let lastFailedCallSignature: string | undefined;
+  let repeatedFailureCount = 0;
+  let repeatedFailureNudgeStreak = 0;
   // Global by default; overridable so tests never touch the real user
   // profile directory.
   const sessionStore = new SessionCardStore(
@@ -168,6 +184,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     cardNudgeStreak = 0;
     forceNudgeStreak = 0;
     awaitingForcedSubstance = false;
+    lastFailedCallSignature = undefined;
+    repeatedFailureCount = 0;
+    repeatedFailureNudgeStreak = 0;
   };
 
   pi.registerFlag("context-card-recent-turns", {
@@ -217,6 +236,10 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     cardNudgeStreak = 0;
     forceNudgeStreak = 0;
     awaitingForcedSubstance = false;
+    pendingCallSignatures.clear();
+    lastFailedCallSignature = undefined;
+    repeatedFailureCount = 0;
+    repeatedFailureNudgeStreak = 0;
     for (const entry of branch) {
       if (entry.type !== "custom" || entry.customType !== ANCHOR_ENTRY_TYPE)
         continue;
@@ -450,7 +473,40 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       systemPrompt: `${event.systemPrompt}\n\nThis session is running unattended: no user is available to answer questions or confirm actions before you take them. Once you've identified a fix, make it directly with the appropriate tool call rather than only describing it in text or asking whether to proceed.`,
     };
   });
+  pi.on("tool_execution_start", (event) => {
+    pendingCallSignatures.set(
+      event.toolCallId,
+      `${event.toolName}:${JSON.stringify(event.args)}`,
+    );
+  });
   pi.on("tool_execution_end", (event) => {
+    const signature = pendingCallSignatures.get(event.toolCallId);
+    pendingCallSignatures.delete(event.toolCallId);
+    if (signature !== undefined && event.isError) {
+      repeatedFailureCount =
+        signature === lastFailedCallSignature ? repeatedFailureCount + 1 : 1;
+      lastFailedCallSignature = signature;
+      if (repeatedFailureCount === 1) repeatedFailureNudgeStreak = 0;
+      if (
+        repeatedFailureCount >= REPEATED_FAILURE_NUDGE_THRESHOLD &&
+        repeatedFailureNudgeStreak < CARD_NUDGE_STREAK_CAP
+      ) {
+        pi.sendMessage(
+          {
+            customType: CARD_NUDGE_MESSAGE_TYPE,
+            content:
+              "That exact tool call just failed the same way it did immediately before - repeating it again won't produce a different result. Check the assumption behind it (file path, command syntax, argument) and try something different rather than retrying verbatim.",
+            display: false,
+          },
+          { deliverAs: "steer" },
+        );
+        repeatedFailureNudgeStreak++;
+      }
+    } else if (signature !== undefined) {
+      lastFailedCallSignature = undefined;
+      repeatedFailureCount = 0;
+      repeatedFailureNudgeStreak = 0;
+    }
     if (!event.isError && isMutationToolName(event.toolName))
       turnMutated = true;
     if (event.isError) return;

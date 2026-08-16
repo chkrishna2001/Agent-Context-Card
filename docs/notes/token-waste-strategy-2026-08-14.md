@@ -717,3 +717,39 @@ permanently - cheap, accurate, and exactly the kind of question ("is this
 extension actually doing anything in this run") worth being able to
 answer in one grep next time instead of building the proof from scratch
 again.
+
+## 2026-08-15: repeated-call nudge - fixes the mechanism it targets, but that's not this instance's dominant failure
+
+Two of the three sympy-18211 failure shapes above (wrong path fixated on
+seven times; the redundant grep loop) share a real signature: the model
+repeating the exact same call after it already failed once. Added a
+targeted fix for that specific pattern - not the broader "picks a
+plausible-but-wrong answer" problem, which is a reasoning-depth issue with
+no clean mechanical fix, and which the user explicitly flagged as outside
+the actual thesis anyway ("our goal is not to make the harness work
+better").
+
+New `tool_execution_start` handler records each call's signature (tool +
+args) by call id; `tool_execution_end` looks it up and tracks a
+consecutive-identical-failure counter, reset by any success or any
+differently-signatured failure - strictly back-to-back repetition, not
+accumulated tolerance across a session. Two consecutive identical failures
+triggers a steer nudge ("that exact call just failed the same way -
+try something different"), capped at two nudges per streak (matching the
+existing `CARD_NUDGE_STREAK_CAP` pattern). 4 new tests (fires on the
+second identical failure, a different failing call doesn't count, a
+success in between resets it, caps at two), fault-injection confirmed.
+119/119 passing, tsc/eslint clean.
+
+Live re-run (4th sympy-18211 repeat, all fixes live): the nudge correctly
+did not fire - this run had no repeated identical failures to catch.
+Diff produced, but wrong file again: `sympy/solvers/solveset.py`, not
+`sympy/core/relational.py` (the actual call path, confirmed the same way
+as every other check in this session - by running the real reproduction
+against the patched tree, not reading the diff). Four runs on this
+instance now: 2 wrong-file, 2 zero-edit-for-other-reasons. The dominant
+failure is a real one this fix was never meant to touch. Landing it
+because it's correct and tested for what it targets, not because it
+resolves this instance - consistent with treating "the harness works
+better" and "the thesis holds" as separate questions, per the user's own
+framing.

@@ -98,13 +98,36 @@ function harness(
       }
       return result;
     },
+    async toolExecutionStart(event: {
+      toolCallId: string;
+      toolName: string;
+      args?: any;
+    }) {
+      for (const handler of handlers.get("tool_execution_start") ?? [])
+        await handler(event, context);
+    },
     async toolExecutionEnd(event: {
+      toolCallId?: string;
       toolName: string;
       isError?: boolean;
       result?: any;
     }) {
       for (const handler of handlers.get("tool_execution_end") ?? [])
         await handler(event, context);
+    },
+    async call(
+      toolCallId: string,
+      toolName: string,
+      args: any,
+      outcome: { isError?: boolean; result?: any } = {},
+    ) {
+      for (const handler of handlers.get("tool_execution_start") ?? [])
+        await handler({ toolCallId, toolName, args }, context);
+      for (const handler of handlers.get("tool_execution_end") ?? [])
+        await handler(
+          { toolCallId, toolName, isError: outcome.isError, result: outcome.result },
+          context,
+        );
     },
     async turnEnd(message: AgentMessage) {
       branch.push({ type: "message", message });
@@ -732,6 +755,106 @@ describe("Pi adapter", () => {
     await extension.start();
     const result = await extension.beforeAgentStart("Base system prompt.");
     expect(result).toBeUndefined();
+  });
+
+  test("the exact same call failing twice in a row triggers a repeated-call steer nudge", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "call-1",
+      "read",
+      { path: "sympy/solveset.py" },
+      { isError: true },
+    );
+    let nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(0);
+
+    await extension.call(
+      "call-2",
+      "read",
+      { path: "sympy/solveset.py" },
+      { isError: true },
+    );
+    nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(1);
+  });
+
+  test("a different failing call does not count toward the repeated-call streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "call-1",
+      "read",
+      { path: "sympy/solveset.py" },
+      { isError: true },
+    );
+    await extension.call(
+      "call-2",
+      "read",
+      { path: "sympy/other.py" },
+      { isError: true },
+    );
+    const nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(0);
+  });
+
+  test("a successful call in between resets the repeated-failure streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "call-1",
+      "read",
+      { path: "sympy/solveset.py" },
+      { isError: true },
+    );
+    await extension.call("call-2", "bash", { command: "ls" }, {});
+    await extension.call(
+      "call-3",
+      "read",
+      { path: "sympy/solveset.py" },
+      { isError: true },
+    );
+    const nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(0);
+  });
+
+  test("repeated-call nudging caps at two, matching the other nudge streak cap", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 5; index += 1) {
+      await extension.call(
+        `call-${index}`,
+        "read",
+        { path: "sympy/solveset.py" },
+        { isError: true },
+      );
+    }
+    const nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(2);
   });
 
   test("a forced update_card call steers the model back to acting, whether thin or substantive", async () => {
