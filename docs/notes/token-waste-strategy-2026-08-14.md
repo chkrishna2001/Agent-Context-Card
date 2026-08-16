@@ -639,3 +639,81 @@ argument order isn't obvious), not evidence the card regressed anything.
 Both fixes this session are validated at what they were built to fix - the
 model now attempts real edits instead of stopping short. Whether it gets
 the answer right is a separate axis this extension doesn't control.
+
+## 2026-08-15: regression-checked sympy-18211 (the one that already worked) - two runs, two different failures, neither traces to today's fixes
+
+Both fixes above are committed (`2d015a4`, `204e1b7`). Before calling this
+session closed, re-ran the previously-resolved instance twice with both
+live, to check for a regression rather than assume none.
+
+**Run 1:** real edit produced (`sympy/solvers/solveset.py`), engagement
+confirmed - but wrong. Ran the actual reproduction against the patched
+tree rather than reading the diff and calling it done: still raised
+`NotImplementedError`, from a code path (`solve_univariate_inequality` via
+`Relational._eval_as_set`) the patch never touched. Pulled the diff from
+the original officially-resolved run (`20260806T160120Z.../r2-1/w`) for
+comparison: the correct fix lives in `sympy/core/relational.py`'s
+`_eval_as_set`, which this run never even opened.
+
+**Run 2:** zero edits. Traced why: the model read `sympy/solveset.py`
+(wrong path - the real file is `sympy/solvers/solveset.py`) seven times in
+the review turn, got `File not found` every time, and never corrected to
+the right path. Separately generated at least one malformed bash command
+with unescaped nested quotes (`rg -n "A|B|C"` inside an outer `"..."`,
+closing the outer quote early and running `solveset`/`ConditionSet` as
+literal shell commands - `command not found`).
+
+Neither failure resembles either of today's two fixed bugs (a forced
+tool_choice interruption, or confirmation-seeking language). Both are
+plain execution noise from this cheap pinned model - wrong file path never
+retried correctly, broken shell quoting - the same category of flakiness
+already surfaced repeatedly all session (the earlier "bash -lc" self-
+wrapping bug, thin `update_card` responses, etc.), not a new pattern this
+session's changes introduced. Not enough samples (1-for-1 resolved before,
+0-for-2 now) to rule out regression with statistical confidence, but the
+failure signatures point at pre-existing model unreliability, not at the
+two mechanisms changed today. Recording as an open question rather than
+either claiming "no regression" or chasing more repeats to force
+certainty out of an inherently noisy cheap model.
+
+User pushed back on this immediately, and rightly so: "maybe you are not
+uninstalling and installing plugin in again after fix" - i.e., is the
+0-for-2 actually evidence the fixes are live at all, or a stale-extension
+artifact? Fair question given both fixes had only been checked via
+self-repro against a hand-run instance, never confirmed inside an actual
+harness invocation. Didn't answer with reasoning about how `--extension
+<path>` loading works - got direct proof instead.
+
+First checked whether the `before_agent_start` system-prompt addition
+left any trace in the existing logs: it didn't, but neither did pi's own
+default system prompt text, nor any `role: "system"` message at all - the
+JSON trace format simply never logs the system prompt, so that absence
+proved nothing either way, for either fix. Added a temporary
+`taskAudit("session", "info", "before_agent_start fired; ctx.hasUI=...;
+ctx.mode=...")` line and ran two checks: a fast standalone `pi -p`
+invocation first (`ctx.hasUI=false; ctx.mode=json`, confirming the
+handler fires and the gate is correct in under 10 seconds, without paying
+for a full 3-turn harness run), then the actual harness again to see the
+same line inside a real run. It fired in all three turns
+(`before_agent_start fired; ctx.hasUI=false`), proving the fix's
+`systemPrompt` branch genuinely executes on every real invocation - the
+extension loads fresh from `index.ts` per spawned process, no stale build
+or install-once cache in the loop at all.
+
+That run (third repeat) also still produced no edit - but for a third,
+again-different reason: 12 implement-turn tool calls, all redundant/
+overlapping `grep`/`rg` searches for the same handful of terms (some of
+them accidentally scoped to the run's own scratch output directory
+instead of `sympy/`), never once opening `sympy/core/relational.py`, the
+file that actually needed the change. Three runs, three distinct failure
+shapes (wrong file edited; wrong path fixated on plus broken shell
+quoting; unfocused repetitive search that never converged) - no shared
+signature with either forced-call derailment or confirmation-seeking
+language. Question answered: not a stale-plugin artifact, not traceable
+to today's two fixes. Ordinary variance in a cheap, high-temperature,
+weak pinned model, now with hard proof behind that conclusion instead of
+just a plausible-sounding excuse. Kept the `hasUI`/`mode` audit line
+permanently - cheap, accurate, and exactly the kind of question ("is this
+extension actually doing anything in this run") worth being able to
+answer in one grep next time instead of building the proof from scratch
+again.

@@ -440,6 +440,11 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     // former case is "there is no user" actually a fact rather than a
     // guess, so only append there - telling an interactive session there's
     // no one to ask would be wrong, not just unnecessary.
+    taskAudit(
+      "session",
+      "info",
+      `before_agent_start fired; ctx.hasUI=${ctx.hasUI}; ctx.mode=${ctx.mode}`,
+    );
     if (ctx.hasUI) return undefined;
     return {
       systemPrompt: `${event.systemPrompt}\n\nThis session is running unattended: no user is available to answer questions or confirm actions before you take them. Once you've identified a fix, make it directly with the appropriate tool call rather than only describing it in text or asking whether to proceed.`,
