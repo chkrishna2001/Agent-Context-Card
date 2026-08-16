@@ -6,6 +6,68 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-16
+
+### Added
+
+- `update_card`, a tool the agent calls to explicitly record durable pending
+  items and findings (uncapped, full-replace semantics), replacing
+  transcript-shape guesswork with agent-declared state.
+- A `turn_end` nudge, capped at two consecutive misses, that prompts the
+  agent when meaningful tool activity accumulates without an `update_card`
+  call.
+- A `before_provider_request` handler that forces `tool_choice` to
+  `update_card` once activity crosses a threshold when the soft nudge goes
+  unanswered, capped by its own streak counter and falling back to a safe
+  no-op for any unrecognized payload shape.
+- A steer message sent immediately after a forced `update_card` call
+  resolves, telling the model the interruption wasn't a stopping point so
+  it resumes acting instead of stopping mid-task.
+- Automatic `consumedByDisuse` evidence retirement: a read nothing engages
+  with again — no later assistant text, no later tool call — retires on its
+  own, recomputed fresh against the full transcript every request.
+- `sources` on `update_card` findings, so a read distilled into a finding
+  retires once the finding survives a grace round (`consumedByFinding`).
+- Bash-based file reads (a single unpiped `cat`/`head`/`tail`/`less`/`more`
+  of one file) now recognized as reads for evidence lifecycle purposes,
+  going through the same classification every other retirement mechanism
+  uses.
+- An explicit "no user is available to answer questions or confirm
+  actions" note appended via `before_agent_start` when `ctx.hasUI` is
+  false, so unattended runs stop waiting on a response that will never
+  come.
+- A repeated-identical-failure nudge: two consecutive calls with the same
+  tool name and arguments that both failed trigger a steer nudge, capped
+  at two per streak.
+- A `ctx.hasUI`/`ctx.mode` audit line on every `before_agent_start` fire,
+  for verifying extension activation inside a real harness invocation.
+- Fixes for two SWE-bench eval harness crashes (unbounded stdout
+  buffering; an empty patch misreported as a grading failure), with both
+  checked-in pilots re-run on current code.
+
+### Changed
+
+- The card is now split into a stable leading message (goal, plan,
+  capabilities) and a volatile trailing status message (findings, pending,
+  filesRead, execution, resumed facts), extending prefix-caching to also
+  cover findings/filesRead/pending.
+- `projectContext` treats a successful `update_card` call as a checkpoint:
+  everything before the most recent one in the current turn collapses,
+  while hot-evidence protection still applies to anything referenced again
+  after it.
+- The rendered card uses flat goal/project/repo/what-happened/pending/
+  findings/failures/files-read lines, replacing the tag-heavy format.
+- Forcing `update_card` now also targets costly reads directly (over
+  ~4000 chars) and validates substance, so a forced call with no real
+  findings or pending no longer resets the nudge/force streaks as if it
+  had resolved anything.
+
+### Fixed
+
+- A checkpoint-prefix read whose only later reference lived in the suffix
+  is no longer locally misclassified as orphaned; local exclusion is now
+  overridden by membership in the global `activeRounds` set.
+
 ## [0.3.0] - 2026-07-30
 
 ### Added
@@ -153,7 +215,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Experimental core API export for researchers.
 - Focused tests, product documentation, design history, and measured A/B results.
 
-[Unreleased]: https://github.com/chkrishna2001/Agent-Context-Card/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/chkrishna2001/Agent-Context-Card/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.4.0
 [0.3.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.3.0
 [0.2.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.2.0
 [0.1.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.1.0
