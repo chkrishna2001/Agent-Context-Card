@@ -865,6 +865,138 @@ describe("Pi adapter", () => {
     expect(nudges.length).toBe(2);
   });
 
+  test("the exact same call succeeding twice in a row triggers a repeated-success steer nudge", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "call-1",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    let nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(0);
+
+    await extension.call(
+      "call-2",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(1);
+  });
+
+  test("a different successful call does not count toward the repeated-success streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "call-1",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    await extension.call("call-2", "bash", { command: "ls" }, {});
+    const nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(0);
+  });
+
+  test("a failing call in between resets the repeated-success streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "call-1",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    await extension.call(
+      "call-2",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      { isError: true },
+    );
+    await extension.call(
+      "call-3",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    const nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(0);
+  });
+
+  test("repeated-success nudging caps at two, matching the other nudge streak cap", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 5; index += 1) {
+      await extension.call(
+        `call-${index}`,
+        "bash",
+        { command: "python reproduce_issue.py" },
+        {},
+      );
+    }
+    const nudges = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    expect(nudges.length).toBe(2);
+  });
+
+  test("a repeated successful call escalates activity so before_provider_request can also force update_card", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    // Below the generic activity threshold on its own - only the two
+    // identical successes should be enough to escalate it, exactly as a
+    // costly read does, without needing 11 distinct calls.
+    await extension.call(
+      "call-1",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    await extension.call(
+      "call-2",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const result = await extension.beforeProviderRequest(payload);
+    expect(result).toBeDefined();
+    expect((result as any).tool_choice).toEqual({
+      type: "function",
+      function: { name: "update_card" },
+    });
+  });
+
   test("a forced update_card call steers the model back to acting, whether thin or substantive", async () => {
     const extension = harness();
     await extension.start();

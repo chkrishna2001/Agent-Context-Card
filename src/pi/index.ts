@@ -79,6 +79,14 @@ const COSTLY_READ_CHARS = 4000;
 // a deterministic tool re-run against an unchanged repo can't succeed the
 // second time just because it's asked again.
 const REPEATED_FAILURE_NUDGE_THRESHOLD = 2;
+// Same reasoning as the failure case, mirrored for successes: two identical
+// successful calls in a row means the second one already told the agent
+// everything the first one did. This is deliberately signature equality,
+// not a classifier over what the command "looks like" (e.g. read-only vs.
+// discovery vs. verification) - a regex over command text can't keep up
+// with every language's test/run/verify invocation, but exact repetition
+// of name+arguments is unambiguous regardless of what the tool does.
+const REPEATED_SUCCESS_NUDGE_THRESHOLD = 2;
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value), 10);
@@ -143,6 +151,14 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let lastFailedCallSignature: string | undefined;
   let repeatedFailureCount = 0;
   let repeatedFailureNudgeStreak = 0;
+  // Same tracking, mirrored for a call that keeps succeeding with the exact
+  // same signature - the model-agnostic, tool-agnostic version of "you're
+  // repeating yourself" that a duplicate-round projection collapse can hide
+  // from the model (each request looks the same as the last, so nothing in
+  // its own view of the world signals it should stop).
+  let lastSuccessfulCallSignature: string | undefined;
+  let repeatedSuccessCount = 0;
+  let repeatedSuccessNudgeStreak = 0;
   // Global by default; overridable so tests never touch the real user
   // profile directory.
   const sessionStore = new SessionCardStore(
@@ -187,6 +203,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     lastFailedCallSignature = undefined;
     repeatedFailureCount = 0;
     repeatedFailureNudgeStreak = 0;
+    lastSuccessfulCallSignature = undefined;
+    repeatedSuccessCount = 0;
+    repeatedSuccessNudgeStreak = 0;
   };
 
   pi.registerFlag("context-card-recent-turns", {
@@ -240,6 +259,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     lastFailedCallSignature = undefined;
     repeatedFailureCount = 0;
     repeatedFailureNudgeStreak = 0;
+    lastSuccessfulCallSignature = undefined;
+    repeatedSuccessCount = 0;
+    repeatedSuccessNudgeStreak = 0;
     for (const entry of branch) {
       if (entry.type !== "custom" || entry.customType !== ANCHOR_ENTRY_TYPE)
         continue;
@@ -483,6 +505,13 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     const signature = pendingCallSignatures.get(event.toolCallId);
     pendingCallSignatures.delete(event.toolCallId);
     if (signature !== undefined && event.isError) {
+      // A failure breaks any in-progress identical-success streak just as
+      // surely as a differently-signatured success would - the next success,
+      // even with the same signature as before the failure, is a fresh
+      // recovery, not a continuation of the earlier streak.
+      lastSuccessfulCallSignature = undefined;
+      repeatedSuccessCount = 0;
+      repeatedSuccessNudgeStreak = 0;
       repeatedFailureCount =
         signature === lastFailedCallSignature ? repeatedFailureCount + 1 : 1;
       lastFailedCallSignature = signature;
@@ -506,6 +535,36 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       lastFailedCallSignature = undefined;
       repeatedFailureCount = 0;
       repeatedFailureNudgeStreak = 0;
+      repeatedSuccessCount =
+        signature === lastSuccessfulCallSignature
+          ? repeatedSuccessCount + 1
+          : 1;
+      lastSuccessfulCallSignature = signature;
+      if (repeatedSuccessCount === 1) repeatedSuccessNudgeStreak = 0;
+      if (
+        repeatedSuccessCount >= REPEATED_SUCCESS_NUDGE_THRESHOLD &&
+        repeatedSuccessNudgeStreak < CARD_NUDGE_STREAK_CAP
+      ) {
+        pi.sendMessage(
+          {
+            customType: CARD_NUDGE_MESSAGE_TYPE,
+            content:
+              "That exact call just succeeded with the same result as the call immediately before it - running it again won't tell you anything new. If this confirms the fix works, record it via update_card and move on to the next step instead of re-checking.",
+            display: false,
+          },
+          { deliverAs: "steer" },
+        );
+        repeatedSuccessNudgeStreak++;
+        // Escalate straight past the generic activity threshold, the same
+        // way a costly read does below - a soft steer alone may not land
+        // once a model is already producing tool-call-only responses with
+        // no reasoning text to redirect, so give the before_provider_request
+        // forcing mechanism a chance to engage on the very next request too.
+        cardActivitySinceUpdate = Math.max(
+          cardActivitySinceUpdate,
+          CARD_ACTIVITY_NUDGE_THRESHOLD + 1,
+        );
+      }
     }
     if (!event.isError && isMutationToolName(event.toolName))
       turnMutated = true;
