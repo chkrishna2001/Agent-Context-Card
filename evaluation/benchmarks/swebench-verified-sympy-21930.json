@@ -1,6 +1,6 @@
 {
   "name": "SWE-bench Verified sympy 21930",
-  "model": "llama-cloud/gemma4:31b",
+  "model": "ai-inference-router/gemma4:31b",
   "thinking": "off",
   "timeoutMs": 1200000,
   "noContextFiles": true,
