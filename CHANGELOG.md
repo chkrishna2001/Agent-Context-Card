@@ -6,6 +6,83 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-01
+
+### Added
+
+- A repeated-success detector mirroring the existing repeated-failure one:
+  two consecutive calls with the same signature that both succeed now
+  trigger a steer nudge and escalate straight past the generic activity
+  threshold, giving the forced-`update_card` mechanism a chance to engage
+  on the very next request. Signature equality only - no keyword or
+  command-shape classification, so it applies uniformly to every tool.
+- A hard, provider-independent block on a third consecutive identical tool
+  call. Traced from a live run: forced `tool_choice` compelled `update_card`
+  twice in one turn and the model called it zero times either time - the
+  provider silently didn't comply, and the same call then ran 143 times
+  before the turn timed out. Steering can only ever be a request; this is
+  enforced at the `tool_call` stage, before execution, independent of
+  anything the provider does with a forced `tool_choice`. `update_card`
+  itself is exempt.
+- `buildExecutionJournal` now surfaces a call that is neither a mutation
+  nor a recognized test/build/lint command once it repeats (`count > 1`),
+  using the exact-signature aggregation already computed - previously such
+  calls stayed off the card even after repeating, leaving the model with
+  no visible record that it had already done this.
+- Findings recorded via `update_card` now render the source file(s) they
+  were distilled from when present, using the schema's existing `sources`
+  field (collected since the `update_card` tool shipped, never rendered
+  until now). Marks a finding as already-established rather than an
+  unverified claim.
+
+### Fixed
+
+- The unattended-session system-prompt note ("make it directly with the
+  appropriate tool call rather than only describing it in text") is now
+  skipped during a planning turn. It was appended on every turn regardless
+  of phase, directly contradicting a planning prompt's own instruction to
+  produce a plan and not touch files - traced to a live run where the
+  model fully identified the correct fix across several `update_card`
+  findings, then kept re-running the same verification check dozens of
+  times instead of ever concluding with the text-only plan that was its
+  only valid remaining action.
+- The steer message sent after a forced `update_card` call resolves no
+  longer unconditionally says "resume exactly what you were doing before
+  it." That phrasing is correct when forcing fired from ordinary
+  accumulated activity, but actively wrong when it fired because a call
+  kept succeeding with an unchanged result - it was telling the model to
+  resume the very repetition the force was meant to interrupt. Now
+  branches on why the force fired.
+- Both checked-in SWE-bench pilot configs pointed at `llama-cloud/gemma4:31b`,
+  a provider no longer present in the local model catalog; running either
+  as checked in failed immediately on an unresolvable model. Repointed at
+  `ai-inference-router/gemma4:31b`, the same weights under a live provider.
+- `swebench-verified-sympy-18211.json`'s turn timeout was 300s while the
+  otherwise-identical `sympy-21930` config used 1200s; aligned to 1200s so
+  a slow turn under the current nudge/force machinery doesn't get killed
+  mid-response and misreported as a harness failure.
+
+### Evidence
+
+- Two of the four SWE-bench Verified pilot re-runs on `gemma-4-31b` (via
+  `ai-inference-router`) looped catastrophically before this release's
+  fixes: one hit 290 consecutive identical calls, another 340, both ending
+  in the turn timeout. Root cause: the projection layer's duplicate-round
+  collapse - by design - keeps only the newest occurrence of a repeated
+  signature, which starves the model of any visible signal that it is
+  repeating itself once the projected view stops changing between
+  requests.
+- A pre-registered batch of 5 paired baseline/card runs on
+  `sympy-18211` (via `openrouter-pinned/google/gemma-4-31b-it`), run
+  straight through with no mid-batch fixes, gives the cleanest read so
+  far: median provider-input change -20.6% (range -51.2% to +230.4%)
+  before the hard block above; -36.4% (range -72.1% to +56.9%) after it.
+  The hard block did not change the median much but cut the worst-case
+  card token count from 9.48M to 2.01M and narrowed the range by over
+  half. n=5 is not a reliability estimate; wide remaining variance in both
+  batches means this is evidence of a real but noisy advantage, not proof
+  of one.
+
 ## [0.4.0] - 2026-08-16
 
 ### Added
@@ -215,7 +292,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Experimental core API export for researchers.
 - Focused tests, product documentation, design history, and measured A/B results.
 
-[Unreleased]: https://github.com/chkrishna2001/Agent-Context-Card/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/chkrishna2001/Agent-Context-Card/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.5.0
 [0.4.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.4.0
 [0.3.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.3.0
 [0.2.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.2.0

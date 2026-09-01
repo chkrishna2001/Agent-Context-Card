@@ -1,6 +1,6 @@
 {
   "name": "agent-context-card",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Deterministic context projection for long-running coding-agent sessions",
   "main": "./index.ts",
