@@ -161,6 +161,33 @@ describe("card extraction", () => {
     });
   });
 
+  test("a one-off unrecognized call stays off the card", () => {
+    const run = call("1", "bash", { command: "python reproduce_issue.py" });
+    const journal = buildExecutionJournal([
+      user("verify"),
+      assistant("run", run),
+      result("SUCCESS", run),
+    ]);
+    expect(journal.changes).toEqual([]);
+  });
+
+  test("an unrecognized call surfaces once it repeats, so the model can see it already did this", () => {
+    const first = call("1", "bash", { command: "python reproduce_issue.py" });
+    const second = call("2", "bash", { command: "python reproduce_issue.py" });
+    const journal = buildExecutionJournal([
+      user("verify"),
+      assistant("run", first),
+      result("SUCCESS", first),
+      assistant("run again", second),
+      result("SUCCESS", second),
+    ]);
+    expect(journal.changes[0]).toMatchObject({
+      kind: "other",
+      status: "success",
+      count: 2,
+    });
+  });
+
   test("does not truncate a complex task into a fixed card budget", () => {
     const goal = "x".repeat(20_000);
     const card = formatContextCard({
@@ -256,6 +283,27 @@ describe("card extraction", () => {
     expect(whatIdx).toBeLessThan(pendingIdx);
     expect(pendingIdx).toBeLessThan(findingsIdx);
     expect(findingsIdx).toBeLessThan(failuresIdx);
+  });
+
+  test("a finding names the files it summarizes, marking it as distilled from an earlier read rather than an unverified claim", () => {
+    const status = formatCardStatus({
+      goal: "Implement JIRA-123",
+      capabilities: { documentation: [], validation: [] },
+      execution: { changes: [], failures: [] },
+      findings: [
+        {
+          topic: "root cause",
+          detail: "raises NotImplementedError instead of returning a set",
+          sources: [
+            "sympy/solvers/inequalities.py",
+            "sympy/solvers/solveset.py",
+          ],
+        },
+      ],
+    });
+    expect(status).toContain(
+      "findings: root cause: raises NotImplementedError instead of returning a set (from sympy/solvers/inequalities.py, sympy/solvers/solveset.py)",
+    );
   });
 
   test("omits empty fields entirely rather than rendering blanks", () => {

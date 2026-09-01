@@ -64,7 +64,16 @@ function formatFailure(record: { action: string; detail?: string }): string {
 }
 
 function formatFinding(finding: CardFinding): string {
-  return `${finding.topic}: ${finding.detail}`;
+  // Naming the source(s) marks this as a synthesis of files already read,
+  // not a fresh claim needing independent verification - the same
+  // distinction a full transcript gives for free by leaving the original
+  // read visible. Without it, a finding reads as an assertion with no
+  // stated basis, which is a plausible reason a model re-runs its own
+  // already-confirmed conclusion instead of trusting the card's record of it.
+  const provenance = finding.sources?.length
+    ? ` (from ${finding.sources.join(", ")})`
+    : "";
+  return `${finding.topic}: ${finding.detail}${provenance}`;
 }
 
 function formatProject(card: RuntimeCard): string | undefined {

@@ -130,7 +130,18 @@ export function buildExecutionJournal(
   return {
     changes: records
       .filter(
-        (record) => record.status === "success" && record.kind !== "other",
+        (record) =>
+          record.status === "success" &&
+          // An "other" call (neither a mutation nor a recognized test/build/
+          // lint invocation) stays hidden the first time - a one-off read or
+          // check isn't durable enough to belong on the card. But once the
+          // exact same call has happened more than once, the repetition
+          // itself is the fact worth surfacing: it's the same signal a full,
+          // unprojected transcript gives for free (the model can see it
+          // already did this), which a collapsed duplicate round otherwise
+          // erases. No keyword classification needed - repetition alone
+          // earns visibility.
+          (record.kind !== "other" || record.count > 1),
       )
       .map(visible),
     failures: records
