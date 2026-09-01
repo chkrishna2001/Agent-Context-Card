@@ -118,12 +118,26 @@ function harness(
       for (const handler of handlers.get("tool_execution_end") ?? [])
         await handler(event, context);
     },
+    async toolCall(event: {
+      toolCallId: string;
+      toolName: string;
+      input?: any;
+    }) {
+      let result: { block?: boolean; reason?: string } | undefined;
+      for (const handler of handlers.get("tool_call") ?? []) {
+        const returned = await handler(event, context);
+        if (returned !== undefined) result = returned;
+      }
+      return result;
+    },
     async call(
       toolCallId: string,
       toolName: string,
       args: any,
       outcome: { isError?: boolean; result?: any } = {},
     ) {
+      const gate = await this.toolCall({ toolCallId, toolName, input: args });
+      if (gate?.block) return gate;
       for (const handler of handlers.get("tool_execution_start") ?? [])
         await handler({ toolCallId, toolName, args }, context);
       for (const handler of handlers.get("tool_execution_end") ?? [])
@@ -136,6 +150,7 @@ function harness(
           },
           context,
         );
+      return gate;
     },
     async turnEnd(message: AgentMessage) {
       branch.push({ type: "message", message });
@@ -765,6 +780,30 @@ describe("Pi adapter", () => {
     expect(result).toBeUndefined();
   });
 
+  test("before_agent_start does not push a planning turn toward acting instead of concluding with text", async () => {
+    const extension = harness(process.cwd(), { hasUI: false });
+    await extension.start();
+    await extension.input("Plan sympy__sympy-18211. Do not modify files.");
+    const result = await extension.beforeAgentStart("Base system prompt.");
+    expect(result).toBeDefined();
+    expect(result?.systemPrompt).toContain("running unattended");
+    expect(result?.systemPrompt).toContain("concluding with a text-only plan");
+    expect(result?.systemPrompt).not.toContain(
+      "rather than only describing it in text or asking whether to proceed",
+    );
+  });
+
+  test("before_agent_start still pushes an implementation turn to act rather than only describe", async () => {
+    const extension = harness(process.cwd(), { hasUI: false });
+    await extension.start();
+    await extension.input("Implement sympy__sympy-18211 with a minimal fix.");
+    const result = await extension.beforeAgentStart("Base system prompt.");
+    expect(result).toBeDefined();
+    expect(result?.systemPrompt).toContain(
+      "rather than only describing it in text or asking whether to proceed",
+    );
+  });
+
   test("the exact same call failing twice in a row triggers a repeated-call steer nudge", async () => {
     const extension = harness();
     await extension.start();
@@ -845,24 +884,38 @@ describe("Pi adapter", () => {
     expect(nudges.length).toBe(0);
   });
 
-  test("repeated-call nudging caps at two, matching the other nudge streak cap", async () => {
+  test("a third identical failing attempt is hard-blocked before the soft nudge cap is ever reached", async () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
+    const results: Array<{ block?: boolean; reason?: string } | undefined> = [];
     for (let index = 0; index < 5; index += 1) {
-      await extension.call(
-        `call-${index}`,
-        "read",
-        { path: "sympy/solveset.py" },
-        { isError: true },
+      results.push(
+        await extension.call(
+          `call-${index}`,
+          "read",
+          { path: "sympy/solveset.py" },
+          { isError: true },
+        ),
       );
+    }
+    // Attempts 1-2 execute for real (triggering exactly one soft nudge on
+    // attempt 2); attempt 3 onward is blocked outright at the tool_call
+    // stage before it ever executes, so the old two-nudge cap is moot - the
+    // hard block supersedes it well before a second nudge's execution could
+    // happen.
+    expect(results.slice(0, 2)).toEqual([undefined, undefined]);
+    for (const result of results.slice(2)) {
+      expect(result?.block).toBe(true);
+      expect(typeof result?.reason).toBe("string");
+      expect(result?.reason?.length).toBeGreaterThan(0);
     }
     const nudges = extension.sentMessages.filter(
       (entry) =>
         entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
         entry.options?.deliverAs === "steer",
     );
-    expect(nudges.length).toBe(2);
+    expect(nudges.length).toBe(1);
   });
 
   test("the exact same call succeeding twice in a row triggers a repeated-success steer nudge", async () => {
@@ -945,24 +998,100 @@ describe("Pi adapter", () => {
     expect(nudges.length).toBe(0);
   });
 
-  test("repeated-success nudging caps at two, matching the other nudge streak cap", async () => {
+  test("a third identical successful attempt is hard-blocked before the soft nudge cap is ever reached", async () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
+    const results: Array<{ block?: boolean; reason?: string } | undefined> = [];
     for (let index = 0; index < 5; index += 1) {
-      await extension.call(
-        `call-${index}`,
-        "bash",
-        { command: "python reproduce_issue.py" },
-        {},
+      results.push(
+        await extension.call(
+          `call-${index}`,
+          "bash",
+          { command: "python reproduce_issue.py" },
+          {},
+        ),
       );
+    }
+    expect(results.slice(0, 2)).toEqual([undefined, undefined]);
+    for (const result of results.slice(2)) {
+      expect(result?.block).toBe(true);
+      expect(typeof result?.reason).toBe("string");
+      expect(result?.reason?.length).toBeGreaterThan(0);
     }
     const nudges = extension.sentMessages.filter(
       (entry) =>
         entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
         entry.options?.deliverAs === "steer",
     );
-    expect(nudges.length).toBe(2);
+    expect(nudges.length).toBe(1);
+  });
+
+  test("a different call in between resets the hard-block counter", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    const first = await extension.call(
+      "call-1",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    const different = await extension.call(
+      "call-2",
+      "bash",
+      { command: "ls" },
+      {},
+    );
+    const second = await extension.call(
+      "call-3",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    expect(first).toBeUndefined();
+    expect(different).toBeUndefined();
+    expect(second).toBeUndefined();
+  });
+
+  test("the hard block never applies to update_card, however many times it repeats", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 5; index += 1) {
+      const result = await extension.call(
+        `call-${index}`,
+        "update_card",
+        { pending: ["same pending, unchanged"] },
+        {},
+      );
+      expect(result).toBeUndefined();
+    }
+  });
+
+  test("the hard block counts a failure and a success of the same call toward one streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "call-1",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      { isError: true },
+    );
+    await extension.call(
+      "call-2",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    const third = await extension.call(
+      "call-3",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    expect(third?.block).toBe(true);
   });
 
   test("a repeated successful call escalates activity so before_provider_request can also force update_card", async () => {
@@ -995,6 +1124,48 @@ describe("Pi adapter", () => {
       type: "function",
       function: { name: "update_card" },
     });
+  });
+
+  test("a force triggered by repeated success tells the model not to resume that call, unlike a generic force", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "call-1",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    await extension.call(
+      "call-2",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    const forced = await extension.beforeProviderRequest(payload);
+    expect(forced).toBeDefined();
+
+    const tool = extension.tools.find((t) => t.name === "update_card");
+    if (!tool) throw new Error("update_card tool missing");
+    await tool.execute("call-3", {}, undefined, undefined, {} as any);
+
+    const steerCalls = extension.sentMessages.filter(
+      (entry) =>
+        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
+        entry.options?.deliverAs === "steer",
+    );
+    const resolutionSteer = steerCalls.at(-1);
+    expect(resolutionSteer?.message.content).toContain(
+      "do not repeat that call again",
+    );
+    expect(resolutionSteer?.message.content).not.toContain(
+      "Resume exactly what you were doing before it",
+    );
   });
 
   test("a forced update_card call steers the model back to acting, whether thin or substantive", async () => {

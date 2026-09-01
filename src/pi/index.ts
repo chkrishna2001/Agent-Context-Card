@@ -87,6 +87,16 @@ const REPEATED_FAILURE_NUDGE_THRESHOLD = 2;
 // with every language's test/run/verify invocation, but exact repetition
 // of name+arguments is unambiguous regardless of what the tool does.
 const REPEATED_SUCCESS_NUDGE_THRESHOLD = 2;
+// Steering the model away from a repeat - soft nudge, then forced
+// tool_choice - depends on the provider actually honoring what we send it.
+// Traced evidence from a live run: before_provider_request forced
+// tool_choice to update_card twice in the same turn, and the model called
+// update_card zero times either time - the provider silently didn't comply,
+// and the same call then repeated 143 times before the turn timed out.
+// Steering can only ever be a request; this threshold is enforced in our
+// own code at the tool_call stage, before execution, independent of
+// anything the provider does with a forced tool_choice.
+const HARD_BLOCK_REPEAT_THRESHOLD = 3;
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value), 10);
@@ -159,6 +169,20 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let lastSuccessfulCallSignature: string | undefined;
   let repeatedSuccessCount = 0;
   let repeatedSuccessNudgeStreak = 0;
+  // Set when a repeated-success escalation is what pushed activity past the
+  // forcing threshold, so the forced call's resolution handler knows this
+  // wasn't ordinary accumulated work - "resume exactly what you were doing"
+  // would be actively wrong here, since what it was doing is the repeated
+  // call itself. Cleared the moment a forced call resolves, whatever caused
+  // it, so a later unrelated force never inherits a stale reason.
+  let forcedDueToRepeatedSuccess = false;
+  // Tracked independently of the tool_execution_end-based counters above -
+  // this fires at the tool_call stage, before the call has even run, so it
+  // has no notion of success/failure yet and doesn't need one: the same
+  // exact signature arriving a third consecutive time is blocked outright,
+  // regardless of whether it succeeded or failed the first two times.
+  let lastAttemptedCallSignature: string | undefined;
+  let consecutiveAttemptCount = 0;
   // Global by default; overridable so tests never touch the real user
   // profile directory.
   const sessionStore = new SessionCardStore(
@@ -206,6 +230,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     lastSuccessfulCallSignature = undefined;
     repeatedSuccessCount = 0;
     repeatedSuccessNudgeStreak = 0;
+    forcedDueToRepeatedSuccess = false;
+    lastAttemptedCallSignature = undefined;
+    consecutiveAttemptCount = 0;
   };
 
   pi.registerFlag("context-card-recent-turns", {
@@ -262,6 +289,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     lastSuccessfulCallSignature = undefined;
     repeatedSuccessCount = 0;
     repeatedSuccessNudgeStreak = 0;
+    forcedDueToRepeatedSuccess = false;
+    lastAttemptedCallSignature = undefined;
+    consecutiveAttemptCount = 0;
     for (const entry of branch) {
       if (entry.type !== "custom" || entry.customType !== ANCHOR_ENTRY_TYPE)
         continue;
@@ -491,8 +521,48 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       `before_agent_start fired; ctx.hasUI=${ctx.hasUI}; ctx.mode=${ctx.mode}`,
     );
     if (ctx.hasUI) return undefined;
+    // "Act, don't just describe" is the right push for an implementation
+    // turn, but it directly contradicts a planning turn's own instruction to
+    // produce a plan and not touch files - a model caught between the two
+    // has nothing but investigation tools left to call, and no clear signal
+    // that concluding with a plain text plan (its only remaining valid
+    // action) counts as "acting" rather than "only describing it in text".
+    // That contradiction was observed driving exactly this: a plan turn that
+    // fully identified the correct fix across several update_card findings,
+    // then kept re-running the same verification check dozens of times
+    // instead of ever concluding.
+    const actionGuidance = planningTurn
+      ? "This turn asks only for a plan - concluding with a text-only plan once your investigation is complete is the correct final action here, not a case of 'only describing it in text' or 'asking whether to proceed'. Do not call a file-modifying tool in this turn."
+      : "Once you've identified a fix, make it directly with the appropriate tool call rather than only describing it in text or asking whether to proceed.";
     return {
-      systemPrompt: `${event.systemPrompt}\n\nThis session is running unattended: no user is available to answer questions or confirm actions before you take them. Once you've identified a fix, make it directly with the appropriate tool call rather than only describing it in text or asking whether to proceed.`,
+      systemPrompt: `${event.systemPrompt}\n\nThis session is running unattended: no user is available to answer questions or confirm actions before you take them. ${actionGuidance}`,
+    };
+  });
+  pi.on("tool_call", (event) => {
+    const name = event.toolName.toLocaleLowerCase();
+    if (
+      name === "update_card" ||
+      name === "card" ||
+      name === "card_new" ||
+      name === "card_reset"
+    )
+      return undefined;
+    const signature = `${event.toolName}:${JSON.stringify(event.input)}`;
+    consecutiveAttemptCount =
+      signature === lastAttemptedCallSignature
+        ? consecutiveAttemptCount + 1
+        : 1;
+    lastAttemptedCallSignature = signature;
+    if (consecutiveAttemptCount < HARD_BLOCK_REPEAT_THRESHOLD) return undefined;
+    taskAudit(
+      "forcing",
+      "info",
+      `blocked repeated call at tool_call stage; count=${consecutiveAttemptCount}`,
+    );
+    return {
+      block: true,
+      reason:
+        "This exact call has already been made in a row with no new arguments and is being blocked - steering the model away from it did not work, so it is refused outright rather than executed again. Do not retry it verbatim. Check it against your pending list: if it already satisfies a pending item, call update_card to drop or complete that item; otherwise take a genuinely different action.",
     };
   });
   pi.on("tool_execution_start", (event) => {
@@ -549,7 +619,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
           {
             customType: CARD_NUDGE_MESSAGE_TYPE,
             content:
-              "That exact call just succeeded with the same result as the call immediately before it - running it again won't tell you anything new. If this confirms the fix works, record it via update_card and move on to the next step instead of re-checking.",
+              "That exact call just succeeded with the same result as the call immediately before it - running it again won't tell you anything new. That repetition is now recorded in 'what happened' above; if it satisfies something on your pending list, call update_card to drop or complete that item instead of checking again.",
             display: false,
           },
           { deliverAs: "steer" },
@@ -564,6 +634,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
           cardActivitySinceUpdate,
           CARD_ACTIVITY_NUDGE_THRESHOLD + 1,
         );
+        forcedDueToRepeatedSuccess = true;
       }
     }
     if (!event.isError && isMutationToolName(event.toolName))
@@ -954,24 +1025,45 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         forceNudgeStreak = 0;
       }
       if (wasForced) {
-        // tool_choice forcing pins the model's entire response to this one
-        // call, which cuts off whatever it was mid-way through doing. Left
-        // alone, the next generation reliably treated that interruption as
-        // a wrap-up cue - writing its plan out in prose and stopping,
-        // exactly where it would otherwise have moved to edit/write calls
-        // (confirmed against a live trace: a full, correct patch plan
-        // narrated in text, then stopReason "stop", never an edit). Steer
-        // it back to acting in the same breath the forced call resolves,
-        // before the model gets a free-choice turn to decide it's done.
-        pi.sendMessage(
-          {
-            customType: CARD_NUDGE_MESSAGE_TYPE,
-            content:
-              "That update_card call was compelled by the harness, not a natural stopping point - it does not mean the task is done. Resume exactly what you were doing before it. If you now have a concrete fix in mind, make it with an edit/apply_patch/write call instead of only describing it in text.",
-            display: false,
-          },
-          { deliverAs: "steer" },
-        );
+        const dueToRepetition = forcedDueToRepeatedSuccess;
+        forcedDueToRepeatedSuccess = false;
+        if (dueToRepetition) {
+          // This force fired because a call kept succeeding with an
+          // unchanged result, not because of ordinary accumulated work - the
+          // generic "resume exactly what you were doing before it" message
+          // below would tell the model to resume the very repetition this
+          // was meant to interrupt. Point it at something different instead:
+          // reconcile pending against what's already been confirmed, or do
+          // something that isn't the call that just triggered this.
+          pi.sendMessage(
+            {
+              customType: CARD_NUDGE_MESSAGE_TYPE,
+              content:
+                "That update_card call was compelled because the same call kept succeeding with the same result - do not repeat that call again. Check it against your pending list: if it already satisfies a pending item, drop or complete that item. Otherwise take a genuinely different action toward the goal.",
+              display: false,
+            },
+            { deliverAs: "steer" },
+          );
+        } else {
+          // tool_choice forcing pins the model's entire response to this one
+          // call, which cuts off whatever it was mid-way through doing. Left
+          // alone, the next generation reliably treated that interruption as
+          // a wrap-up cue - writing its plan out in prose and stopping,
+          // exactly where it would otherwise have moved to edit/write calls
+          // (confirmed against a live trace: a full, correct patch plan
+          // narrated in text, then stopReason "stop", never an edit). Steer
+          // it back to acting in the same breath the forced call resolves,
+          // before the model gets a free-choice turn to decide it's done.
+          pi.sendMessage(
+            {
+              customType: CARD_NUDGE_MESSAGE_TYPE,
+              content:
+                "That update_card call was compelled by the harness, not a natural stopping point - it does not mean the task is done. Resume exactly what you were doing before it. If you now have a concrete fix in mind, make it with an edit/apply_patch/write call instead of only describing it in text.",
+              display: false,
+            },
+            { deliverAs: "steer" },
+          );
+        }
       }
       return {
         content: [{ type: "text", text: "Card updated." }],
