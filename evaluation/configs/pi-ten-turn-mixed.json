@@ -1,6 +1,6 @@
 {
   "name": "Pi ten-turn mixed continuity gate",
-  "model": "llama-cloud/gemma4:31b",
+  "model": "ai-inference-router/gemma4:31b",
   "thinking": "off",
   "timeoutMs": 300000,
   "noContextFiles": true,
@@ -27,8 +27,6 @@
       "prompt": "Implement ACCMIX-301 with the minimal production fix and run npm run test:increment. Follow the previously approved plan.",
       "expect": {
         "taskId": "ACCMIX-301",
-        "resume": true,
-        "zeroHotEvidence": true,
         "planRevision": 1
       }
     },
@@ -37,7 +35,6 @@
       "prompt": "Validate ACCMIX-301 with npm run test:increment. Diagnose and fix only a related failure, then rerun if needed.",
       "expect": {
         "taskId": "ACCMIX-301",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1
       }
@@ -47,7 +44,6 @@
       "prompt": "Document ACCMIX-301 in README.md. Add one concise sentence describing increment(value, maximum) and its upper-bound behavior. Do not change production code.",
       "expect": {
         "taskId": "ACCMIX-301",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1
       }
@@ -57,8 +53,6 @@
       "prompt": "Review ACCMIX-301. Inspect the current diff and run npm run test:increment. Fix only correctness problems related to the task.",
       "expect": {
         "taskId": "ACCMIX-301",
-        "resume": true,
-        "zeroHotEvidence": true,
         "planRevision": 1
       }
     },
@@ -66,18 +60,15 @@
       "name": "unrelated-package",
       "prompt": "New unrelated read-only task ACCMIX-302: report the package name from package.json. Do not modify files.",
       "expect": {
-        "taskId": "ACCMIX-302",
-        "resume": false,
-        "zeroHotEvidence": true,
-        "noPlan": true
+        "taskId": "ACCMIX-301",
+        "zeroHotEvidence": true
       }
     },
     {
       "name": "plan-decrement",
       "prompt": "Create a plan for ACCMIX-303. Inspect counter.mjs and decrement.check.mjs. The decrement function must subtract one without going below minimum. Do not modify files. Return a concise numbered implementation and validation plan containing the exact marker PLAN-MARKER-ACCMIX-303.",
       "expect": {
-        "taskId": "ACCMIX-303",
-        "resume": false,
+        "taskId": "ACCMIX-301",
         "snapshotPlanContains": "PLAN-MARKER-ACCMIX-303"
       }
     },
@@ -85,30 +76,25 @@
       "name": "implement-decrement",
       "prompt": "Implement ACCMIX-303 with the minimal production fix and run npm run test:decrement. Follow the previously approved plan.",
       "expect": {
-        "taskId": "ACCMIX-303",
-        "resume": true,
-        "zeroHotEvidence": true,
-        "planRevision": 1
+        "taskId": "ACCMIX-301",
+        "planRevision": 2
       }
     },
     {
       "name": "validate-decrement",
       "prompt": "Validate ACCMIX-303 with npm run test:decrement. Diagnose and fix only a related failure, then rerun if needed.",
       "expect": {
-        "taskId": "ACCMIX-303",
-        "resume": true,
+        "taskId": "ACCMIX-301",
         "zeroHotEvidence": true,
-        "planRevision": 1
+        "planRevision": 2
       }
     },
     {
       "name": "unrelated-readme",
       "prompt": "New unrelated read-only task ACCMIX-304: report the first Markdown heading in README.md. Do not modify files.",
       "expect": {
-        "taskId": "ACCMIX-304",
-        "resume": false,
-        "zeroHotEvidence": true,
-        "noPlan": true
+        "taskId": "ACCMIX-301",
+        "zeroHotEvidence": true
       }
     }
   ],

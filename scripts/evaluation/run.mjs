@@ -668,6 +668,19 @@ async function main() {
         const childEnvironment = {
           ...process.env,
           PI_TELEMETRY: "0",
+          // SessionCardStore defaults to ~/.agent-context-card/cards - the
+          // real, shared, global profile directory - unless redirected.
+          // Without this, every eval run's card snapshots were landing
+          // there instead of anywhere this harness looks, commingled
+          // across runs, while readTaskSnapshots() below always read an
+          // empty, never-populated workspace-local directory: snapshot-
+          // dependent assertions (snapshotPlanContains) could never pass,
+          // for any config, regardless of model or session mode.
+          AGENT_CONTEXT_CARD_TEST_CARDS_DIR: path.join(
+            workspace,
+            ".agent-context-card",
+            "tasks",
+          ),
         };
         if (agentDirectory)
           childEnvironment.PI_CODING_AGENT_DIR = agentDirectory;
