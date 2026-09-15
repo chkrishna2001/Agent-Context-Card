@@ -6,6 +6,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createTaskAnchor, taskGoalFromInput } from "../core/anchor";
+import { commandSignature } from "../core/command-signature";
 import {
   extractPhaseLimitedDirectives,
   isPlanningRequest,
@@ -141,6 +142,22 @@ function readRange(
   return { path, range: [offset, offset + limit] };
 }
 
+const BASH_TOOL_NAMES = new Set(["bash", "shell", "execute_bash"]);
+
+// Normalized `${verb}:${pattern}` key for a bash call this project knows how
+// to fuzzy-match, or undefined if it isn't a search-style command
+// `commandSignature` recognizes (see src/core/command-signature.ts for the
+// allow-list and why it's kept narrow).
+function bashPatternKey(
+  toolName: string,
+  input: Record<string, unknown>,
+): string | undefined {
+  if (!BASH_TOOL_NAMES.has(toolName.toLocaleLowerCase())) return undefined;
+  const command = typeof input.command === "string" ? input.command : "";
+  const parsed = commandSignature(command);
+  return parsed ? `${parsed.verb}:${parsed.pattern}` : undefined;
+}
+
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -262,6 +279,19 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   // Mirrors hardBlockReflectionStreak, but per path for the same reason
   // containedRepeatCounts is per path rather than global.
   const containedReflectionStreaks = new Map<string, number>();
+  // Consecutive count of bash calls that normalize to the same
+  // `${verb}:${pattern}` key (see bashPatternKey), keyed per that
+  // normalized key rather than globally - the same reasoning as
+  // containedRepeatCounts: an interleaved bash call under a different key
+  // must not reset this key's count, and two genuinely different search
+  // patterns sharing a verb get independent keys and never interact.
+  // Deliberately not merged with the exact-signature counters above: a
+  // command's output isn't provably safe to treat as redundant just because
+  // its pattern repeats (unlike a read's content), so this only ever feeds
+  // the block-and-reflect path, never the success cache.
+  const bashPatternCounts = new Map<string, number>();
+  // Mirrors containedReflectionStreaks, same per-key reasoning.
+  const bashPatternReflectionStreaks = new Map<string, number>();
   // Global by default; overridable so tests never touch the real user
   // profile directory.
   const sessionStore = new SessionCardStore(
@@ -316,6 +346,8 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     readCoverage.clear();
     containedRepeatCounts.clear();
     containedReflectionStreaks.clear();
+    bashPatternCounts.clear();
+    bashPatternReflectionStreaks.clear();
     successfulCallCache.clear();
   };
 
@@ -381,6 +413,8 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     readCoverage.clear();
     containedRepeatCounts.clear();
     containedReflectionStreaks.clear();
+    bashPatternCounts.clear();
+    bashPatternReflectionStreaks.clear();
     for (const entry of branch) {
       if (entry.type !== "custom" || entry.customType !== ANCHOR_ENTRY_TYPE)
         continue;
@@ -696,6 +730,40 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         }
       } else {
         containedRepeatCounts.set(read.path, 0);
+      }
+    }
+
+    // Only calls whose full signature differs from the immediately
+    // preceding attempt are counted here - a byte-identical repeat is
+    // already the exact-signature hard block's job below, whose message
+    // ("the exact same arguments again") is accurate for that case; this
+    // mechanism exists specifically for the case that check misses, where
+    // the pattern repeats but the surrounding arguments genuinely vary.
+    const patternKey = isRepeatAttempt
+      ? undefined
+      : bashPatternKey(event.toolName, event.input);
+    if (patternKey) {
+      const nextCount = (bashPatternCounts.get(patternKey) ?? 0) + 1;
+      bashPatternCounts.set(patternKey, nextCount);
+      if (nextCount >= HARD_BLOCK_REPEAT_THRESHOLD) {
+        taskAudit(
+          "forcing",
+          "info",
+          `blocked near-duplicate search command at tool_call stage; pattern=${patternKey}; count=${nextCount}`,
+        );
+        const streak = bashPatternReflectionStreaks.get(patternKey) ?? 0;
+        if (streak < HARD_BLOCK_REFLECTION_STREAK_CAP) {
+          bashPatternReflectionStreaks.set(patternKey, streak + 1);
+          pi.sendUserMessage(
+            `You've now run a search with the same pattern (${patternKey}) several times in a row, only varying the surrounding arguments (e.g. which files it's scoped to) - that's not a new search, it's the same one repeated. Stop and answer this first, in plain text: what did the earlier run(s) of this search already tell you, and what specifically are you still trying to find that a broader or narrower search of the same pattern would answer? Once you've answered that, either act on what you already found, or search for something genuinely different.`,
+            { deliverAs: "steer" },
+          );
+        }
+        return {
+          block: true,
+          reason:
+            "This search pattern has been run several times in a row with only the surrounding arguments (e.g. target files) varying - it is refused as a near-duplicate rather than executed again. Use the results you already have instead of re-running the same search.",
+        };
       }
     }
 

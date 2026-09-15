@@ -1298,6 +1298,118 @@ describe("Pi adapter", () => {
     expect(bFourth?.block).toBe(true);
   });
 
+  test("near-duplicate grep calls with the same pattern but varying trailing file lists are hard-blocked", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    const first = await extension.call(
+      "call-1",
+      "bash",
+      {
+        command:
+          'grep -r "def as_set" sympy/core/relational.py sympy/core/expr.py',
+      },
+      {},
+    );
+    const second = await extension.call(
+      "call-2",
+      "bash",
+      {
+        command:
+          'grep -r "def as_set" sympy/core/relational.py sympy/core/expr.py sympy/sets/sets.py',
+      },
+      {},
+    );
+    const third = await extension.call(
+      "call-3",
+      "bash",
+      {
+        command: 'grep -r "def as_set" sympy/sets/sets.py',
+      },
+      {},
+    );
+    // None of these three share identical arguments, so the exact-signature
+    // hard block never sees a repeat - only the search-pattern normalizer
+    // catches this.
+    expect(first).toBeUndefined();
+    expect(second).toBeUndefined();
+    expect(third?.block).toBe(true);
+    expect(third?.reason).toContain("near-duplicate");
+    const reflections = extension.sentUserMessages.filter(
+      (entry) => entry.options?.deliverAs === "steer",
+    );
+    expect(reflections.length).toBe(1);
+    expect(String(reflections[0]!.content)).toContain("def as_set");
+  });
+
+  test("legitimately different search patterns sharing a verb are never blocked, however many are run", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    const results: Array<{ block?: boolean } | undefined> = [];
+    for (let index = 0; index < 5; index += 1) {
+      results.push(
+        await extension.call(
+          `call-${index}`,
+          "bash",
+          { command: `grep -r "distinct pattern ${index}" sympy/file.py` },
+          {},
+        ),
+      );
+    }
+    for (const result of results) expect(result).toBeUndefined();
+  });
+
+  test("a non-search bash call interleaved in between does not reset the search pattern's streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "grep-1",
+      "bash",
+      { command: 'grep -r "def as_set" sympy/core/relational.py' },
+      {},
+    );
+    await extension.call(
+      "other-1",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    const result = await extension.call(
+      "grep-2",
+      "bash",
+      { command: 'grep -r "def as_set" sympy/core/expr.py' },
+      {},
+    );
+    await extension.call(
+      "other-2",
+      "bash",
+      { command: "python reproduce_issue.py" },
+      {},
+    );
+    const third = await extension.call(
+      "grep-3",
+      "bash",
+      { command: 'grep -r "def as_set" sympy/sets/sets.py' },
+      {},
+    );
+    expect(result).toBeUndefined();
+    expect(third?.block).toBe(true);
+  });
+
+  test("an exact byte-identical repeat of a search command is handled by the existing exact-signature block, not the near-duplicate one", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    const args = { command: 'grep -r "def as_set" sympy/core/relational.py' };
+    await extension.call("call-1", "bash", args, {});
+    await extension.call("call-2", "bash", args, {});
+    const third = await extension.call("call-3", "bash", args, {});
+    expect(third?.block).toBe(true);
+    expect(third?.reason).toContain("no new arguments");
+  });
+
   test("a repeated successful call escalates activity so before_provider_request can also force update_card", async () => {
     const extension = harness();
     await extension.start();
