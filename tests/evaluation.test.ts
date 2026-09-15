@@ -84,8 +84,21 @@ describe("evaluation metrics", () => {
     expect(new Set(ledger.results.map((result: any) => result.id)).size).toBe(
       ledger.results.length,
     );
+    // The ledger's own methodologyCaveat names exactly which id prefixes
+    // used the removed sessionMode "fresh" cross-session bridge and are
+    // "pending re-run, not current evidence" - claimable must match that
+    // scope for every entry, not just the ones a prior edit happened to
+    // flip, so this is checked structurally rather than against a fixed list.
+    const staleIdPrefixes = [
+      "ten-turn-mixed",
+      "gpt-5-nano-plan-phase",
+      "swebench-sympy",
+    ];
+    const isStaleId = (id: string) =>
+      staleIdPrefixes.some((prefix) => id.startsWith(prefix));
     for (const result of ledger.results) {
-      expect(result.claimable).toBe(true);
+      expect(result.claimable).toBe(!isStaleId(result.id));
+      if (!result.claimable) expect(typeof result.staleness).toBe("string");
       for (const [metric, reported] of Object.entries(result.changePercent)) {
         const baseline = result.baseline[metric];
         const card = result.card[metric];
@@ -102,7 +115,8 @@ describe("evaluation metrics", () => {
       return sorted[Math.floor(sorted.length / 2)];
     };
     for (const result of ledger.repeatedResults) {
-      expect(result.claimable).toBe(true);
+      expect(result.claimable).toBe(!isStaleId(result.id));
+      if (!result.claimable) expect(typeof result.staleness).toBe("string");
       expect(result.pairs).toHaveLength(3);
       for (const [metric, reported] of Object.entries(
         result.pairedChangePercent,
