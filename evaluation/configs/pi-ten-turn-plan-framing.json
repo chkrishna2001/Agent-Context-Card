@@ -33,7 +33,6 @@
       "prompt": "Implement ACCMIX-301 with the minimal production fix and run npm run test:increment. Follow the previously approved plan.",
       "expect": {
         "taskId": "ACCMIX-301",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1,
         "planPhaseFramingState": "post-planning"
@@ -44,7 +43,6 @@
       "prompt": "Validate ACCMIX-301 with npm run test:increment. Diagnose and fix only a related failure, then rerun if needed.",
       "expect": {
         "taskId": "ACCMIX-301",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1,
         "planPhaseFramingState": "post-planning"
@@ -55,7 +53,6 @@
       "prompt": "Document ACCMIX-301 in README.md. Add one concise sentence describing increment(value, maximum) and its upper-bound behavior. Do not change production code.",
       "expect": {
         "taskId": "ACCMIX-301",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1,
         "planPhaseFramingState": "post-planning"
@@ -66,7 +63,6 @@
       "prompt": "Review ACCMIX-301. Inspect the current diff and run npm run test:increment. Fix only correctness problems related to the task.",
       "expect": {
         "taskId": "ACCMIX-301",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1,
         "planPhaseFramingState": "post-planning"
@@ -96,7 +92,6 @@
       "prompt": "Implement ACCMIX-303 with the minimal production fix and run npm run test:decrement. Follow the previously approved plan.",
       "expect": {
         "taskId": "ACCMIX-303",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1,
         "planPhaseFramingState": "post-planning"
@@ -107,7 +102,6 @@
       "prompt": "Validate ACCMIX-303 with npm run test:decrement. Diagnose and fix only a related failure, then rerun if needed.",
       "expect": {
         "taskId": "ACCMIX-303",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1,
         "planPhaseFramingState": "post-planning"

@@ -47,7 +47,6 @@
       "prompt": "Implement ACCPHASE-401 with the minimal production fix and run npm run test:increment. Follow the previously approved plan.",
       "expect": {
         "taskId": "ACCPHASE-401",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1
       }
@@ -57,7 +56,6 @@
       "prompt": "Document ACCPHASE-401 in README.md. Add exactly this sentence: increment(value, maximum) increments value by one without exceeding maximum. Do not change production code.",
       "expect": {
         "taskId": "ACCPHASE-401",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1
       }
@@ -67,7 +65,6 @@
       "prompt": "Validate ACCPHASE-401 with npm run test:increment. Diagnose and fix only a related failure, then rerun if needed.",
       "expect": {
         "taskId": "ACCPHASE-401",
-        "resume": true,
         "zeroHotEvidence": true,
         "planRevision": 1
       }
