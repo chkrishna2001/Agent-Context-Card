@@ -6,6 +6,73 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- When the hard repeat-block engages, escalate with a real user-turn
+  message (`pi.sendUserMessage`, not the existing custom/steer nudge
+  channel) asking the model to name what it's trying to achieve before
+  retrying. Traced from two live sessions: a model stuck past the hard
+  block just resubmitted the identical call 8 and 20+ times, forever,
+  because the block's refusal is a tool-result read as "that call
+  failed," not a steering channel - what actually broke both loops was a
+  real chat message asking what the model was trying to do. Capped so an
+  unattended session can't manufacture fake user turns indefinitely if
+  even this doesn't land either.
+- Redundant-read detection by line-range containment
+  (`src/core/intervals.ts`), not just exact argument equality. Traced a
+  live session where a model oscillated between 27 overlapping windowed
+  reads of one file, no two sharing the same `offset`/`limit` - the
+  exact-signature hard block never once engaged. A read whose entire
+  requested range is already covered by prior reads of the same path is
+  now recognized as redundant regardless of its exact arguments;
+  sequential non-overlapping reads of a large file are never blocked,
+  however many chunks it takes.
+- A session doctor (`npm run doctor -- <session.jsonl>`, or `--last`/
+  `--list` to find recent sessions without knowing the path) that reports
+  tool-call tallies, block/cache event timelines, and read hotspots from a
+  raw Pi session log - automates the diagnosis that previously required
+  hand-written DuckDB queries.
+- `--wsl` flag on `grade-swebench.mjs` to run official SWE-bench grading
+  through Docker inside WSL2 on machines with no native Windows Docker.
+
+### Fixed
+
+- The existing success cache (returns a cached result instead of
+  re-executing an identical repeated call) had no cap: once a signature
+  succeeded once, every future identical repeat was served from cache
+  forever, with no error or refusal for the model to react to. Traced a
+  live run where this served the same bash command 446 times across a
+  full 20-minute turn timeout. Now gated on the same hard-block threshold
+  - below it, caching still avoids real re-execution for legitimate quick
+    repeats; at or past it, it falls through to the block-and-reflect path
+    instead of bypassing it.
+- `TaskStateAudit`'s `operation`/`status` unions didn't include `"cache"`/
+  `"hit"`, so the cache-hit audit call didn't type-check.
+- The evaluation harness never set `AGENT_CONTEXT_CARD_TEST_CARDS_DIR` when
+  spawning `pi`, so every eval run's card snapshots landed in the real,
+  shared, global profile directory instead of anywhere the harness's own
+  `readTaskSnapshots()` looked - `snapshotPlanContains` assertions could
+  never pass, for any config, regardless of model or session mode.
+- `evaluation/configs/pi-ten-turn-mixed.json`'s turn expectations tested
+  same-session automatic task-switch detection, a heuristic removed
+  entirely in favor of "one anchor per session, never auto-switch" (a
+  false positive there silently discards context the model still needs).
+  Updated `taskId`/`resume`/`zeroHotEvidence`/`planRevision` expectations
+  to match the current, intentional design instead of the removed one; also
+  repointed its baked-in model at one that still exists
+  (`ai-inference-router/gemma4:31b`), matching the fix already applied to
+  both SWE-bench pilot configs.
+- `prepareWorkspace()` for `workspace.type: "copy"` never initialized a git
+  repository in the copied destination. Since that destination is nested
+  inside this project's own working tree, any `git diff`/`git status`/
+  `git log` the model ran searched upward and silently operated on this
+  repo's own uncommitted state instead of the fixture - traced a live run
+  where a plain `git diff` leaked 51,320 characters of this repo's own
+  unrelated working-tree diff into the model's context, inflating every
+  downstream token measurement for the rest of that session. Now runs
+  `git init` plus an initial commit (committer identity passed via env, not
+  dependent on the host's global git config) in the copied workspace.
+
 ## [0.5.0] - 2026-09-01
 
 ### Added

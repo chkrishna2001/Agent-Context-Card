@@ -614,20 +614,133 @@ estimate how much token/request overhead is actually attributable to _not_
 having goal-switching (turns 6 and 10, the deliberately-unrelated ones)
 before deciding whether it's worth building.
 
-## Current status (updated)
+## Ten-turn v3: harness fixes confirmed, clean `correct: yes/yes`
 
-Still not committed. New files this session: `scripts/evaluation/session-doctor.mjs`,
-plus everything listed above. Both the WSL grading validation and the fresh
-ten-turn mycoder run were in progress when this note was last updated -
-check `.agent-context-card/e/mycoder-18211-n3/.../report.json` region for
-Docker grading results and `.agent-context-card/e/mycoder-ten-turn-v2/` for
-the multi-turn results (v1 predates both harness fixes above - superseded,
-kept on disk only for before/after comparison) before treating this
-paragraph as current.
+Reran with both harness fixes (snapshot-path wiring, stale config
+assertions) in place: `.agent-context-card/e/mycoder-ten-turn-v3/`. All 21
+continuity assertions PASS, `correct: baseline=yes, card=yes` for the first
+time on this config. Total provider input: baseline 287,751, card 115,177
+(-60.0%) - closely matching the -60.5% median from the SWE-bench n=3 gate
+earlier. At the time this looked like the clean multi-turn baseline the
+whole session had been working toward.
 
-**Still open, unchanged**: the `bash`/grep near-duplicate detection (no fix
-attempted); reconciling `evidence-ledger.json`'s `claimable: true` flags on
-`swebench-sympy-18211`/`21930` against its own `methodologyCaveat` (flagged,
-not fixed); the `zeroHotEvidence` mixed-result question above; the
-`newGoal`/goal-switching feature (not built - pending the ten-turn baseline
-data); getting this whole change set committed.
+It wasn't clean. See below.
+
+## First commit + push checkpoint
+
+User asked to commit and push before going further into goal-switching, and
+to treat frequent commits as a standing practice (easier to revert). Fixed
+two more `tsc` errors this surfaced (`"cache"`/`"hit"` weren't in
+`TaskStateAudit`'s `operation`/`status` unions - the pre-existing WIP this
+session had been building on top of all along) - full validation clean
+after. Five commits pushed to `origin/main` (`0d4c977..14b5473`):
+
+1. `d1d719b` - the three loop-safety fixes (reflection escalation,
+   range-containment reads, cache-cap) plus the two type-union fixes.
+2. `6970e9e` - the session doctor.
+3. `b529945` - WSL Docker grading.
+4. `bffdb3a` - the two ten-turn-mixed harness bugs (snapshot-path wiring,
+   stale assertions).
+5. `14b5473` - this note.
+
+## The goal-switching question turned out to be a measurement bug
+
+Went to check what `review-increment` actually does that leaves so much
+context live for turn 6 to inherit (the ~31K-token gap between card's
+`unrelated-package` cost and its own steady-state cost in v3). Traced it:
+`review-increment`'s only tool calls are `git diff` and
+`npm run test:increment` - no file reads at all, so "evidence not retired"
+was never the mechanism. The actual cause: `git diff`'s result was **51,320
+characters** in one message, and diffing its content showed it was a diff
+of `pi-ten-turn-mixed.json` itself - this repo's own file, not anything in
+the counter-mixed fixture.
+
+Root cause: `prepareWorkspace()` for `workspace.type: "copy"`
+(`scripts/evaluation/run.mjs`) does a plain recursive file copy with no
+`git init`. Confirmed neither `evaluation/fixtures/counter-mixed` nor the
+copied workspace has its own `.git`. Since the copy destination
+(`.agent-context-card/e/.../w`) is nested inside this repo's own working
+tree, any `git diff`/`git status`/`git log` the model runs searches upward,
+finds this project's real `.git`, and operates on **this repo's own
+uncommitted state** instead of the fixture. At the moment the v3 run
+executed, this session's own uncommitted `pi-ten-turn-mixed.json` changes
+were sitting in the working tree - that's what leaked in.
+
+This invalidated the "review turns leave lingering evidence" theory (never
+about evidence at all) and meant every `zeroHotEvidence`/cost number from
+every ten-turn-mixed run today, v1 through v3, needs to be read with that
+caveat. Only `"type": "copy"` configs are affected -
+`pi-ten-turn-mixed.json` and presumably `pi-plan-phase-experiment.json`/
+`pi-ten-turn-plan-framing.json`; the SWE-bench pilots use `"type": "git"`
+(a real clone) and are unaffected. This also means every _historical_
+ten-turn-mixed-family result in AGENTS.md (the "Ten-session mixed proof,"
+"GPT-5 Nano ten-session proof," and the controlled n=3 gates) carries the
+same unquantified risk - whatever was uncommitted in this dev repo at the
+moment each ran could have leaked in.
+
+**Fix**: `prepareWorkspace()` now runs `git init` + `add -A` + a `--no-verify`
+commit in the copied destination, with committer identity passed via env
+(`GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL`/etc.) rather than depending on
+whatever global git config happens to be set on the machine running this.
+Verified standalone against the real fixture before rerunning anything:
+`git diff` now correctly returns 0 bytes, `git status` correctly reports a
+clean tree.
+
+## Ten-turn v4: the actually-clean baseline
+
+`.agent-context-card/e/mycoder-ten-turn-v4/`. `correct: yes/yes` again.
+Numbers changed substantially now that the leak is gone:
+
+| Turn                       | v3 (contaminated) | v4 (clean) |
+| -------------------------- | ----------------: | ---------: |
+| baseline review-increment  |            38,674 |      8,028 |
+| baseline unrelated-package |            36,883 |      6,041 |
+| baseline unrelated-readme  |            39,138 |      8,351 |
+| **total baseline**         |           287,751 |     72,502 |
+| **total card**             |           115,177 |     54,766 |
+| **savings**                |            -60.0% | **-24.5%** |
+
+Card's per-turn cost is now flat across the entire session (4,264-7,058,
+no spikes anywhere) - the "spike" turns in every prior run were the leak,
+not something inherent to review/unrelated turns. The -60.0% figure that
+looked like it was confirming the project's historical numbers was itself
+partly an artifact: the leak inflated baseline disproportionately (baseline
+has no mechanism to ever shed the leaked diff; card's retirement machinery
+apparently cleared it by the time it mattered), flattering card's relative
+number. -24.5% is the real, trustworthy figure for this fixture - still a
+genuine win, just a smaller one, and on a 3-file fixture with a naturally
+tiny context ceiling, not necessarily representative of a longer real
+session.
+
+**Goal-switching verdict, with clean data**: `unrelated-package` (turn 6)
+now costs card 4,876 - barely above its own cheapest turns elsewhere in the
+same session (4,264-4,541). The remaining gap a goal-declaration mechanism
+could capture is a few hundred to ~2,000 tokens on one turn type, not the
+~31,000-token ceiling the contaminated v3 data implied. **Conclusion:
+don't build `newGoal`/goal-switching on this evidence** - the existing
+evidence-retirement machinery is already doing nearly all the real work
+without it. The bigger, higher-confidence lesson from this whole thread was
+the workspace-isolation bug itself, not a case for a new feature.
+
+## Current status (final, this session)
+
+Everything through the first push (`14b5473`) is on `origin/main`. Not yet
+pushed as of this section: the workspace-isolation fix
+(`prepareWorkspace()` git-init) - queued for a second commit+push once this
+note and the changelog are updated, per the same "commit before moving on"
+practice as the first checkpoint.
+
+**Resolved this session**: the two original CoreApps loop bugs (unbounded
+read oscillation via range-containment; unbounded cache-hit bypass);
+snapshot-path wiring; stale ten-turn-mixed assertions; the workspace git-
+isolation leak. **Open, unchanged**: the `bash`/grep near-duplicate
+detection (no fix attempted - different, fuzzier problem, deliberately not
+tackled here); reconciling `evidence-ledger.json`'s `claimable: true` flags
+on `swebench-sympy-18211`/`21930` against its own `methodologyCaveat`
+(flagged, not fixed); the `zeroHotEvidence` mixed pass/fail pattern noted
+in the v2 section above (turns 2/5/8 fail, 3/4/9/10 pass) - not
+investigated further once the workspace-isolation bug turned out to be the
+dominant factor, worth a fresh look now that measurement is trustworthy;
+official SWE-bench correctness grading only exercised manually and on one
+prediction so far (card-r1 from `mycoder-18211-n3`, `resolved: false`) -
+the other five predictions from that n=3 gate are still ungraded.

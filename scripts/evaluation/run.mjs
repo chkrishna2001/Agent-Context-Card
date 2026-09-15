@@ -256,6 +256,38 @@ async function prepareWorkspace(spec, destination) {
   if (spec.type === "copy") {
     const source = path.resolve(repositoryRoot, spec.source);
     await cp(source, destination, { recursive: true, errorOnExist: true });
+    // Without a repo of its own here, any git command the model runs
+    // (git diff, git status, git log) searches upward from an empty
+    // directory and finds this project's own real .git - silently
+    // operating on this repo's working tree instead of the fixture. Traced
+    // live: a plain `git diff` during a "review" turn injected 51K
+    // characters of this repo's own unrelated uncommitted changes into the
+    // model's context, on both variants equally, none of it about the
+    // fixture at all. Committer identity is passed via env rather than
+    // relying on global git config being set on whatever machine runs this.
+    const gitEnv = {
+      ...process.env,
+      GIT_AUTHOR_NAME: "agent-context-card-eval",
+      GIT_AUTHOR_EMAIL: "eval@agent-context-card.invalid",
+      GIT_COMMITTER_NAME: "agent-context-card-eval",
+      GIT_COMMITTER_EMAIL: "eval@agent-context-card.invalid",
+    };
+    const gitStepTimeoutMs = 30_000;
+    for (const args of [
+      ["init", "--quiet", "--initial-branch=main"],
+      ["add", "-A"],
+      ["commit", "--quiet", "--no-verify", "-m", "Initial fixture snapshot"],
+    ]) {
+      const result = await runProcess("git", args, {
+        cwd: destination,
+        env: gitEnv,
+        timeoutMs: gitStepTimeoutMs,
+      });
+      if (result.exitCode !== 0)
+        throw new Error(
+          `git ${args[0]} failed while isolating copied workspace: ${result.stderr}`,
+        );
+    }
     return;
   }
   if (spec.type === "git") {
