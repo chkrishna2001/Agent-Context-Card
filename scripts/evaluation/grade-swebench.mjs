@@ -49,6 +49,23 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", `'\\''`)}'`;
 }
 
+// Same as shellQuote, but for a path that may start with `~/` (the default
+// --wsl-venv value does: "~/swebench-venv/bin/python3"). Single quotes
+// suppress bash's tilde expansion entirely - `'~/swebench-venv/...'` is
+// passed to the shell as a literal path containing a `~` character, which
+// doesn't exist, rather than expanding to the user's home directory. Traced
+// live: this made every --wsl grading run fail with "No such file or
+// directory" even though the venv itself was fine. Leaving the leading `~/`
+// unquoted (so the shell still expands it) while still quoting the rest
+// keeps the same injection-safety this script already treats as cheap
+// insurance, per shellQuote's own comment.
+function shellQuoteHomePath(value) {
+  const str = String(value);
+  return str.startsWith("~/")
+    ? `~/${shellQuote(str.slice(2))}`
+    : shellQuote(str);
+}
+
 async function filesBelow(directory, name) {
   const found = [];
   let entries;
@@ -249,13 +266,11 @@ async function main() {
       ? (() => {
           const distro = args["wsl-distro"];
           const invocation = [
-            python,
-            "-m",
-            "swebench.harness.run_evaluation",
-            ...pythonArgs,
-          ]
-            .map(shellQuote)
-            .join(" ");
+            shellQuoteHomePath(python),
+            ...["-m", "swebench.harness.run_evaluation", ...pythonArgs].map(
+              shellQuote,
+            ),
+          ].join(" ");
           const script = `cd ${shellQuote(toWslPath(cwd))} && ${invocation}`;
           return [
             "wsl",
