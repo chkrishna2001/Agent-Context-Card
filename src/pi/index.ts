@@ -17,6 +17,11 @@ import {
 } from "../core/continuity";
 import { buildExecutionJournal, isMutationToolName } from "../core/execution";
 import {
+  type Interval,
+  isFullyCovered,
+  mergeInterval,
+} from "../core/intervals";
+import {
   formatCardStatus,
   formatContextCard,
   planPhaseFramingState,
@@ -97,6 +102,44 @@ const REPEATED_SUCCESS_NUDGE_THRESHOLD = 2;
 // own code at the tool_call stage, before execution, independent of
 // anything the provider does with a forced tool_choice.
 const HARD_BLOCK_REPEAT_THRESHOLD = 3;
+// The hard block's own refusal text is not a steering channel - it's a
+// tool-result the model reads as "that call failed," and evidence from two
+// live sessions shows a model stuck in this loop just resubmits the exact
+// same call in response, 8 and 20+ times respectively, forever, since
+// nothing caps it. What broke the loop both times wasn't a stronger refusal;
+// it was a genuine user-turn message asking what the model was trying to do,
+// which forced it to articulate the goal and pick something else. Capped
+// like the other nudge streaks so an unattended session doesn't manufacture
+// user turns indefinitely if even that doesn't land.
+const HARD_BLOCK_REFLECTION_STREAK_CAP = 2;
+
+const READ_TOOL_NAMES = new Set(["read", "view_file"]);
+
+// Line range a read-like call would return, as a half-open [start, end)
+// interval, or undefined if this call isn't a path+offset/limit read we can
+// reason about. Offset defaults to line 1 (matches observed 1-indexed
+// argument values); a missing limit means "to end of file", modeled as a
+// very large end so it only shows as covered by an equally-unbounded prior
+// read, never falsely satisfied by a small bounded one.
+function readRange(
+  toolName: string,
+  input: Record<string, unknown>,
+): { path: string; range: Interval } | undefined {
+  if (!READ_TOOL_NAMES.has(toolName.toLocaleLowerCase())) return undefined;
+  const path = typeof input.path === "string" ? input.path : undefined;
+  if (!path) return undefined;
+  const offset =
+    typeof input.offset === "number" && Number.isFinite(input.offset)
+      ? input.offset
+      : 1;
+  const limit =
+    typeof input.limit === "number" &&
+    Number.isFinite(input.limit) &&
+    input.limit > 0
+      ? input.limit
+      : Number.MAX_SAFE_INTEGER - offset;
+  return { path, range: [offset, offset + limit] };
+}
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value), 10);
@@ -153,6 +196,18 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   // seen at tool_execution_start, keyed by call id so tool_execution_end -
   // which carries no args of its own - can look up what actually ran.
   const pendingCallSignatures = new Map<string, string>();
+  // Mirrors pendingCallSignatures's lifecycle (set at tool_execution_start,
+  // consumed and deleted at tool_execution_end) but carries the parsed
+  // path+range instead of a stringified signature, since tool_execution_end
+  // has no args of its own to recompute it from.
+  const pendingReadRanges = new Map<
+    string,
+    { path: string; range: Interval } | undefined
+  >();
+  // Cache of the last successful result for each unique tool call signature.
+  // This allows us to break "block loops" by providing the cached result
+  // instead of refusing the call when it repeats.
+  const successfulCallCache = new Map<string, any>();
   // Tracks a call that just failed with the exact same signature as the
   // one immediately before it - a model stuck repeating a broken command
   // verbatim rather than adjusting. Resets on any success or on a
@@ -183,6 +238,30 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   // regardless of whether it succeeded or failed the first two times.
   let lastAttemptedCallSignature: string | undefined;
   let consecutiveAttemptCount = 0;
+  // How many times we've escalated the hard-block refusal for the *current*
+  // stuck signature with a real user-turn message rather than just the
+  // tool-result refusal text. Resets whenever the attempted signature
+  // changes, mirroring consecutiveAttemptCount.
+  let hardBlockReflectionStreak = 0;
+  // Union of line ranges successfully read from each path so far, keyed by
+  // path. Traced evidence from a live run: a model oscillating between
+  // overlapping windows of the same 996-line file made 27 reads, no two
+  // with the same offset/limit, so consecutiveAttemptCount above never saw
+  // a repeated signature and the hard block never engaged even once. A read
+  // whose entire requested range is already inside this union is redundant
+  // regardless of its exact arguments.
+  const readCoverage = new Map<string, Interval[]>();
+  // Consecutive redundant-by-containment read count per path. Deliberately
+  // separate from consecutiveAttemptCount: containment isn't about the
+  // immediately preceding call being identical, it's about this path's
+  // cumulative known content already including everything the new call
+  // would return, so an interleaved read of a *different* path must not
+  // reset it - only a read of this same path that actually extends its
+  // coverage should.
+  const containedRepeatCounts = new Map<string, number>();
+  // Mirrors hardBlockReflectionStreak, but per path for the same reason
+  // containedRepeatCounts is per path rather than global.
+  const containedReflectionStreaks = new Map<string, number>();
   // Global by default; overridable so tests never touch the real user
   // profile directory.
   const sessionStore = new SessionCardStore(
@@ -233,6 +312,11 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     forcedDueToRepeatedSuccess = false;
     lastAttemptedCallSignature = undefined;
     consecutiveAttemptCount = 0;
+    hardBlockReflectionStreak = 0;
+    readCoverage.clear();
+    containedRepeatCounts.clear();
+    containedReflectionStreaks.clear();
+    successfulCallCache.clear();
   };
 
   pi.registerFlag("context-card-recent-turns", {
@@ -283,6 +367,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     forceNudgeStreak = 0;
     awaitingForcedSubstance = false;
     pendingCallSignatures.clear();
+    pendingReadRanges.clear();
     lastFailedCallSignature = undefined;
     repeatedFailureCount = 0;
     repeatedFailureNudgeStreak = 0;
@@ -292,6 +377,10 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     forcedDueToRepeatedSuccess = false;
     lastAttemptedCallSignature = undefined;
     consecutiveAttemptCount = 0;
+    hardBlockReflectionStreak = 0;
+    readCoverage.clear();
+    containedRepeatCounts.clear();
+    containedReflectionStreaks.clear();
     for (const entry of branch) {
       if (entry.type !== "custom" || entry.customType !== ANCHOR_ENTRY_TYPE)
         continue;
@@ -548,17 +637,81 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     )
       return undefined;
     const signature = `${event.toolName}:${JSON.stringify(event.input)}`;
-    consecutiveAttemptCount =
-      signature === lastAttemptedCallSignature
-        ? consecutiveAttemptCount + 1
-        : 1;
+    const isRepeatAttempt = signature === lastAttemptedCallSignature;
+    consecutiveAttemptCount = isRepeatAttempt ? consecutiveAttemptCount + 1 : 1;
     lastAttemptedCallSignature = signature;
+    if (!isRepeatAttempt) hardBlockReflectionStreak = 0;
+
+    // Intercept repeated calls: if we have a cached successful result for this
+    // exact signature, return it immediately instead of blocking or executing
+    // - but only below the hard-block threshold. Traced evidence from a live
+    // run: once a signature had succeeded once, every future identical
+    // repeat was being served from cache unconditionally, with no cap at
+    // all - the model got a normal-looking success every time, never an
+    // error or refusal, so it had no signal anything was wrong and looped
+    // the same bash command 446 times across a full 20-minute turn timeout.
+    // Below the threshold, caching still avoids a real re-execution for a
+    // handful of legitimate quick repeats; at or past it, this must fall
+    // through to the same block-and-reflect path as any other stuck exact
+    // repeat, not bypass it entirely.
+    if (consecutiveAttemptCount < HARD_BLOCK_REPEAT_THRESHOLD) {
+      const cachedResult = successfulCallCache.get(signature);
+      if (cachedResult !== undefined) {
+        taskAudit(
+          "cache",
+          "hit",
+          `returning cached result for repeated call: ${signature}`,
+        );
+        return {
+          result: cachedResult,
+        };
+      }
+    }
+
+    const read = readRange(event.toolName, event.input);
+    if (read) {
+      const covered = readCoverage.get(read.path) ?? [];
+      if (covered.length > 0 && isFullyCovered(covered, read.range)) {
+        const nextCount = (containedRepeatCounts.get(read.path) ?? 0) + 1;
+        containedRepeatCounts.set(read.path, nextCount);
+        if (nextCount >= HARD_BLOCK_REPEAT_THRESHOLD) {
+          taskAudit(
+            "forcing",
+            "info",
+            `blocked contained-range repeat read at tool_call stage; path=${read.path}; count=${nextCount}`,
+          );
+          const streak = containedReflectionStreaks.get(read.path) ?? 0;
+          if (streak < HARD_BLOCK_REFLECTION_STREAK_CAP) {
+            containedReflectionStreaks.set(read.path, streak + 1);
+            pi.sendUserMessage(
+              `You just requested ${read.path} again, and every line of what you asked for is already something you read earlier in this conversation - look back at your own prior reads of this file instead of requesting it again. Stop and answer this first, in plain text: what specific information are you still missing from this file, and where in it do you expect to find that you haven't already looked? Once you've answered that, either request a genuinely different range of this file, or move on to a different action.`,
+              { deliverAs: "steer" },
+            );
+          }
+          return {
+            block: true,
+            reason:
+              "Every line this call requested has already been returned by an earlier read of the same path in this conversation, under different offset/limit arguments - it is refused as redundant rather than executed again. Look back at the earlier read(s) of this file instead of retrying. If you need content this file doesn't have, take a genuinely different action.",
+          };
+        }
+      } else {
+        containedRepeatCounts.set(read.path, 0);
+      }
+    }
+
     if (consecutiveAttemptCount < HARD_BLOCK_REPEAT_THRESHOLD) return undefined;
     taskAudit(
       "forcing",
       "info",
       `blocked repeated call at tool_call stage; count=${consecutiveAttemptCount}`,
     );
+    if (hardBlockReflectionStreak < HARD_BLOCK_REFLECTION_STREAK_CAP) {
+      hardBlockReflectionStreak++;
+      pi.sendUserMessage(
+        `You just tried to call ${event.toolName} with the exact same arguments again, and it's being refused every time. Stop and answer this first, in plain text: what are you actually trying to achieve right now, and why did you expect repeating that exact call to get you there? Once you've answered that, either call update_card if it's already satisfied, or take a genuinely different action toward it - not this call again.`,
+        { deliverAs: "steer" },
+      );
+    }
     return {
       block: true,
       reason:
@@ -570,10 +723,33 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       event.toolCallId,
       `${event.toolName}:${JSON.stringify(event.args)}`,
     );
+    pendingReadRanges.set(
+      event.toolCallId,
+      readRange(event.toolName, event.args ?? {}),
+    );
   });
   pi.on("tool_execution_end", (event) => {
     const signature = pendingCallSignatures.get(event.toolCallId);
     pendingCallSignatures.delete(event.toolCallId);
+    const pendingRead = pendingReadRanges.get(event.toolCallId);
+    pendingReadRanges.delete(event.toolCallId);
+    if (pendingRead && !event.isError) {
+      const priorCoverage = readCoverage.get(pendingRead.path) ?? [];
+      // Only a read that actually extends this path's known coverage is
+      // real progress. A contained repeat that executed anyway (its streak
+      // was still below the block threshold) must not reset the streak
+      // that's specifically counting contained repeats - resetting it here
+      // would let the count restart every round and never reach the
+      // threshold at all.
+      if (!isFullyCovered(priorCoverage, pendingRead.range)) {
+        containedRepeatCounts.set(pendingRead.path, 0);
+        containedReflectionStreaks.set(pendingRead.path, 0);
+      }
+      readCoverage.set(
+        pendingRead.path,
+        mergeInterval(priorCoverage, pendingRead.range),
+      );
+    }
     if (signature !== undefined && event.isError) {
       // A failure breaks any in-progress identical-success streak just as
       // surely as a differently-signatured success would - the next success,
@@ -602,6 +778,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         repeatedFailureNudgeStreak++;
       }
     } else if (signature !== undefined) {
+      // Cache the successful result for future repeats of this exact signature.
+      successfulCallCache.set(signature, event.result);
+
       lastFailedCallSignature = undefined;
       repeatedFailureCount = 0;
       repeatedFailureNudgeStreak = 0;

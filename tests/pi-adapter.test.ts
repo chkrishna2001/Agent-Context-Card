@@ -30,6 +30,7 @@ function harness(
   const tools: ToolDefinition[] = [];
   const entries: Array<{ customType: string; data: unknown }> = [];
   const sentMessages: Array<{ message: any; options?: any }> = [];
+  const sentUserMessages: Array<{ content: any; options?: any }> = [];
   const branch: any[] = [];
   const pi = {
     registerFlag(name: string, options: { default?: string | boolean }) {
@@ -48,6 +49,9 @@ function harness(
     sendMessage(message: any, options?: any) {
       sentMessages.push({ message, options });
     },
+    sendUserMessage(content: any, options?: any) {
+      sentUserMessages.push({ content, options });
+    },
   } as unknown as ExtensionAPI;
   agentContextCard(pi);
   const context = {
@@ -64,6 +68,7 @@ function harness(
     tools,
     entries,
     sentMessages,
+    sentUserMessages,
     branch: () => [...branch],
     setFlag(name: string, value: string | boolean) {
       flags.set(name, value);
@@ -123,7 +128,8 @@ function harness(
       toolName: string;
       input?: any;
     }) {
-      let result: { block?: boolean; reason?: string } | undefined;
+      let result:
+        { block?: boolean; reason?: string; result?: unknown } | undefined;
       for (const handler of handlers.get("tool_call") ?? []) {
         const returned = await handler(event, context);
         if (returned !== undefined) result = returned;
@@ -916,6 +922,14 @@ describe("Pi adapter", () => {
         entry.options?.deliverAs === "steer",
     );
     expect(nudges.length).toBe(1);
+    // 3 blocked attempts (call-2 through call-4), but the reflection escalation
+    // is capped at HARD_BLOCK_REFLECTION_STREAK_CAP (2) so an unattended
+    // session doesn't manufacture user turns forever if even this doesn't land.
+    expect(extension.sentUserMessages.length).toBe(2);
+    for (const entry of extension.sentUserMessages) {
+      expect(entry.options?.deliverAs).toBe("steer");
+      expect(String(entry.content)).toContain("read");
+    }
   });
 
   test("the exact same call succeeding twice in a row triggers a repeated-success steer nudge", async () => {
@@ -1054,6 +1068,34 @@ describe("Pi adapter", () => {
     expect(second).toBeUndefined();
   });
 
+  test("a different call in between also resets the reflection-message streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    for (let index = 0; index < 3; index += 1) {
+      await extension.call(
+        `same-${index}`,
+        "bash",
+        { command: "python reproduce_issue.py" },
+        {},
+      );
+    }
+    expect(extension.sentUserMessages.length).toBe(1);
+    await extension.call("different", "bash", { command: "ls" }, {});
+    for (let index = 0; index < 3; index += 1) {
+      await extension.call(
+        `same-again-${index}`,
+        "bash",
+        { command: "python reproduce_issue.py" },
+        {},
+      );
+    }
+    // The different call in between reset the streak, so hitting the hard
+    // block a second time is a fresh occurrence, not a continuation - it
+    // should escalate again rather than staying silenced by the earlier cap.
+    expect(extension.sentUserMessages.length).toBe(2);
+  });
+
   test("the hard block never applies to update_card, however many times it repeats", async () => {
     const extension = harness();
     await extension.start();
@@ -1092,6 +1134,168 @@ describe("Pi adapter", () => {
       {},
     );
     expect(third?.block).toBe(true);
+  });
+
+  test("the success cache stops bypassing the hard block once the repeat threshold is reached", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    const args = { command: "python verify.py" };
+    const first = await extension.call("call-1", "bash", args, {
+      result: "PASS",
+    });
+    const second = await extension.call("call-2", "bash", args, {
+      result: "PASS",
+    });
+    const third = await extension.call("call-3", "bash", args, {
+      result: "PASS",
+    });
+    const fourth = await extension.call("call-4", "bash", args, {
+      result: "PASS",
+    });
+    expect(first).toBeUndefined();
+    // Below the hard-block threshold: served from cache, not blocked, and
+    // not re-executed as a fresh call.
+    expect(second?.result).toBe("PASS");
+    expect(second?.block).toBeUndefined();
+    // At and past the threshold, caching must no longer bypass the block -
+    // this is the exact failure mode traced live: a signature that had
+    // succeeded once was cached forever after with no cap, so a model stuck
+    // repeating it got a normal-looking success every time and never
+    // stopped (446 repeats over a full 20-minute turn timeout in one run).
+    expect(third?.block).toBe(true);
+    expect(fourth?.block).toBe(true);
+    const cacheHits = extension.entries.filter(
+      (entry) =>
+        entry.customType === TASK_STATE_AUDIT_ENTRY_TYPE &&
+        (entry.data as { operation?: string }).operation === "cache",
+    );
+    expect(cacheHits.length).toBe(1);
+  });
+
+  test("overlapping reads of the same file under shifting offset/limit are recognized as redundant and hard-blocked", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    const first = await extension.call(
+      "call-1",
+      "read",
+      { path: "sympy/solvers/inequalities.py", offset: 1, limit: 100 },
+      {},
+    );
+    const second = await extension.call(
+      "call-2",
+      "read",
+      { path: "sympy/solvers/inequalities.py", offset: 50, limit: 30 },
+      {},
+    );
+    const third = await extension.call(
+      "call-3",
+      "read",
+      { path: "sympy/solvers/inequalities.py", offset: 20, limit: 40 },
+      {},
+    );
+    const fourth = await extension.call(
+      "call-4",
+      "read",
+      { path: "sympy/solvers/inequalities.py", offset: 10, limit: 10 },
+      {},
+    );
+    // None of these four calls share identical arguments, so the plain
+    // exact-signature hard block never sees a repeat - only range
+    // containment catches this.
+    expect(first).toBeUndefined();
+    expect(second).toBeUndefined();
+    expect(third).toBeUndefined();
+    expect(fourth?.block).toBe(true);
+    expect(fourth?.reason).toContain(
+      "already been returned by an earlier read",
+    );
+    const reflections = extension.sentUserMessages.filter(
+      (entry) => entry.options?.deliverAs === "steer",
+    );
+    expect(reflections.length).toBe(1);
+    expect(String(reflections[0]!.content)).toContain(
+      "sympy/solvers/inequalities.py",
+    );
+  });
+
+  test("sequential non-overlapping reads of a large file are never blocked, however many chunks", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    const results: Array<{ block?: boolean } | undefined> = [];
+    for (let index = 0; index < 5; index += 1) {
+      results.push(
+        await extension.call(
+          `call-${index}`,
+          "read",
+          {
+            path: "sympy/solvers/inequalities.py",
+            offset: index * 100 + 1,
+            limit: 100,
+          },
+          {},
+        ),
+      );
+    }
+    for (const result of results) expect(result).toBeUndefined();
+  });
+
+  test("a read of a different path in between does not reset the original path's contained-repeat streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.call(
+      "a-1",
+      "read",
+      { path: "sympy/solvers/inequalities.py", offset: 1, limit: 50 },
+      {},
+    );
+    await extension.call(
+      "b-1",
+      "read",
+      { path: "sympy/core/relational.py", offset: 1, limit: 50 },
+      {},
+    );
+    await extension.call(
+      "a-2",
+      "read",
+      { path: "sympy/solvers/inequalities.py", offset: 10, limit: 10 },
+      {},
+    );
+    await extension.call(
+      "b-2",
+      "read",
+      { path: "sympy/core/relational.py", offset: 10, limit: 10 },
+      {},
+    );
+    await extension.call(
+      "a-3",
+      "read",
+      { path: "sympy/solvers/inequalities.py", offset: 20, limit: 5 },
+      {},
+    );
+    await extension.call(
+      "b-3",
+      "read",
+      { path: "sympy/core/relational.py", offset: 20, limit: 5 },
+      {},
+    );
+    const aFourth = await extension.call(
+      "a-4",
+      "read",
+      { path: "sympy/solvers/inequalities.py", offset: 30, limit: 5 },
+      {},
+    );
+    const bFourth = await extension.call(
+      "b-4",
+      "read",
+      { path: "sympy/core/relational.py", offset: 30, limit: 5 },
+      {},
+    );
+    expect(aFourth?.block).toBe(true);
+    expect(bFourth?.block).toBe(true);
   });
 
   test("a repeated successful call escalates activity so before_provider_request can also force update_card", async () => {
