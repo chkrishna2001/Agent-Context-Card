@@ -1,9 +1,18 @@
 # Repeat-detection & eval-harness follow-ups
 
-**Status (2026-09-15): the triggering bugs are fixed, tested, committed, and
-pushed to `origin/main` at `e65870d`. Working tree is clean. Four follow-up
-investigation threads are open and unstarted — none blocking, none started.**
-Safe to build on; nothing here is half-finished code.
+**Status (2026-09-16): threads #1-#4 below are done, committed, and pushed
+to `origin/main` (commits `38a3cdd`, `4f8a773`, `b8f8501`, `b39b8f8`).
+Working tree is clean. The 2026-09-16 session also ran the step-5 repeat
+campaign partway (mycoder both fixtures done; Haiku SWE-bench done, Haiku
+ten-turn-mixed not yet run) and discovered + fully investigated a major,
+still-unresolved finding: on Haiku 4.5, card's real dollar cost is 5-19x
+baseline's despite tied raw token counts, because Anthropic's prompt cache
+never reports a read for card's requests even though they're provably
+byte-stable. Two candidate fixes were built, tested, and confirmed NOT to
+help, then reverted (never committed) — full trail in
+`docs/notes/haiku-cache-defeat-2026-09-16.md`. Read that before
+re-attempting anything cache-related.** Safe to build on; nothing here is
+half-finished code.
 
 ## What we're working on
 
@@ -138,48 +147,46 @@ below landed.
 
 ## What's next
 
-Four independent, unstarted threads. None blocks any other.
+Threads #1-#4 from the 2026-09-15 session are **done** (commits `38a3cdd`,
+`4f8a773`, `b8f8501`, `b39b8f8`):
 
-1. **Investigate the `zeroHotEvidence` mixed pass/fail pattern.** In the
-   _clean_ ten-turn-mixed data (post workspace-isolation fix), this
-   assertion still needs checking — it showed a reproducible (not random)
-   pattern across two contaminated runs (FAIL on turns 2/5/8, PASS on
-   3/4/9/10) before the workspace bug was found and fixed, and was never
-   re-examined against clean data. Could be a real, explicable pattern
-   (e.g. tied to which turns leave a read unconsumed by a mutation grace
-   boundary) or could itself be another stale assertion. Not touched
-   because the workspace bug turned out to dominate everything else in the
-   same investigation.
+1. **`zeroHotEvidence`**: resolved against clean data (`mycoder-ten-turn-v4`
+   logs already on disk, no rerun needed) — all 5 applicable turns PASS,
+   27/27 assertions clean. The earlier mixed pattern was a symptom of the
+   workspace-isolation leak, already fixed; no `projection.ts` change
+   needed.
+2. **`bash`/grep near-duplicate detection**: built (`src/core/command-signature.ts`,
+   normalize-by-verb-and-pattern, conservative allow-list, false-positive
+   tests included) and wired into `src/pi/index.ts`'s block-and-reflect
+   path.
+3. **Evidence-ledger reconciliation**: all 9 entries the ledger's own
+   `methodologyCaveat` disowns (both `swebench-sympy` ids, plus the whole
+   `ten-turn-mixed`/`gpt-5-nano-plan-phase` family that had never been
+   flagged) now have `claimable: false` and a `staleness` note.
+   `tests/evaluation.test.ts` checks this structurally against the
+   caveat's own id-prefix rule.
+4. **Grading**: all 6 predictions from `mycoder-18211-n3` now officially
+   graded via `--wsl` (found and fixed a real bug along the way — the
+   default WSL venv path's `~` was being shell-quoted, suppressing bash's
+   tilde expansion). Result: **baseline 1/3 resolved, card 1/3 resolved —
+   tied**, not a card advantage.
 
-2. **`bash`/grep near-duplicate detection** — a distinct, unaddressed gap
-   from #3 above. Traced live (mycoder session): `grep -r "def as_set"
-sympy/core/relational.py sympy/core/expr.py ...` fired 5 times in 6
-   seconds with slightly different trailing file-list arguments each time
-   — never matched the exact-signature check, never matched the
-   range-containment check (that's read-specific), so it looped
-   unimpeded. Needs a different, fuzzier approach (e.g. normalize by
-   command verb + primary search pattern, ignoring trailing argument
-   variation) — explicitly flagged as riskier than the read fix and not
-   attempted.
+**New, open thread from the 2026-09-16 session** — see
+`docs/notes/haiku-cache-defeat-2026-09-16.md` for the complete trail:
 
-3. **Reconcile `evaluation/results/evidence-ledger.json`'s stale
-   `claimable: true` flags.** Its own `methodologyCaveat` field says every
-   result whose id starts `swebench-sympy` used the removed
-   `sessionMode: "fresh"` cross-session bridge and is "pending re-run, not
-   current evidence" — but both `swebench-sympy-18211` and
-   `swebench-sympy-21930` entries are still marked `claimable: true`. The
-   flag was never corrected to match the caveat. Also: no equivalent
-   caveat exists for `pi-ten-turn-mixed.json`-family results even though
-   they have the exact same staleness problem (confirmed and fixed this
-   session, see #6 above) — the ledger's historical ten-turn-mixed/GPT-5-Nano
-   entries need the same caveat treatment.
-
-4. **Grade the remaining SWE-bench predictions.** Only 1 of 6 predictions
-   from today's n=3 gate (`.agent-context-card/e/mycoder-18211-n3/`,
-   **gitignored, local-only, see warning below**) has been officially
-   graded via Docker: `card-r1`, result `resolved: false`. The other 5
-   (`baseline-r1/r2/r3`, `card-r2/r3`) are ungraded — efficiency numbers
-   exist for all 6, correctness only for one.
+5. **Why Anthropic's prompt cache never reports a read for card's Haiku
+   requests.** Card's raw tokens were tied with baseline on Haiku SWE-bench,
+   but real dollar cost was 5-19x higher, because cache-read stayed ~0
+   while cache-write grew every request. Two concrete, code-grounded fixes
+   were built, tested with real request-payload instrumentation (not
+   guesswork), and **both confirmed not to help** — reverted. Every theory
+   checkable from this client's code has been checked and ruled out (see
+   the notes file's "Hypotheses checked and ruled out" section). What's
+   left needs either a token-level payload diff nobody's found yet, or
+   Anthropic-side account visibility this codebase can't produce. Also
+   still open: the Haiku leg of `pi-ten-turn-mixed.json` was never run
+   (this investigation superseded it) — budget for it separately if
+   resumed, expecting the same cost/token disconnect.
 
 ## How to do it
 
@@ -249,38 +256,21 @@ has the complete chronological investigation — exact numbers, every dead
 end, the full reasoning behind every design choice above. Read it before
 re-deriving anything that feels like it should already have an answer.
 
-## What we expect from it
+## What we learned from threads #1-#4 (all done)
 
-- **Thread #1 (`zeroHotEvidence`)**: either a clear explanation tying the
-  pass/fail pattern to a specific, correct mechanism (in which case fix the
-  config's expectations to match, the same way `taskId`/`resume`/
-  `planRevision` were fixed this session), or a confirmed real bug in
-  retirement timing (in which case it needs a proper fix in
-  `src/core/projection.ts`, not a config edit). Don't guess — reproduce it
-  with clean data first the way this session did for the other three
-  stale-assertion cases.
-- **Thread #2 (`bash`/grep)**: a design for the "fuzzy match" needs to be
-  validated against real false-positive risk before shipping — a normalize-
-  by-verb approach could plausibly block a legitimate `grep` with
-  genuinely different search terms that happen to share a verb. Write it
-  with the same rigor as the read fix: a dedicated test proving legitimate,
-  differently-scoped commands are never blocked, not just that the repeat
-  case is caught.
-- **Thread #3 (evidence-ledger)**: this is a documentation/bookkeeping fix,
-  not code — update `claimable` flags and add the missing caveat, run
-  `tests/evaluation.test.ts` (which recalculates published percentages from
-  raw counts) to confirm nothing else depends on the stale flag.
-- **Thread #4 (grading)**: once all 6 are graded, the real result is a
-  correctness comparison (X/3 baseline resolved vs Y/3 card resolved) —
-  report that number plainly, the way GPT-5 Nano's 0/3 controlled result is
-  reported in `AGENTS.md`, not just the efficiency percentage. If
-  correctness is worse for card, say so as plainly as when it's better.
-- **General bar, learned the hard way this session**: before trusting any
-  aggregate percentage — especially one that happens to match a prior
-  expected result — check the per-turn/per-instance breakdown for spikes.
-  A number that "looks right" is not verification.
+- **Thread #4's actual result matters most**: card is not a correctness
+  win on this instance — 1/3 vs 1/3, tied. Efficiency and correctness are
+  separate claims; don't let a favorable token percentage imply a
+  favorable resolution rate without checking.
+- **General bar, learned the hard way across both sessions**: before
+  trusting any aggregate percentage — especially one that happens to match
+  a prior expected result — check the per-turn/per-instance breakdown for
+  spikes, and check dollar cost separately from token count. A number that
+  "looks right" is not verification (this caught both the workspace-leak
+  contamination in the 2026-09-15 session and the Haiku caching disconnect
+  in the 2026-09-16 session).
 
-**This doc will need updating again** once any of the four threads above is
-started or finished — update its status line and fold in what changed,
-rather than leaving it to go stale the way the eval configs it describes
-did.
+**This doc will need updating again** once thread #5 (the Haiku caching
+mystery, see `docs/notes/haiku-cache-defeat-2026-09-16.md`) is resumed or
+resolved — update its status line and fold in what changed, rather than
+leaving it to go stale the way the eval configs it describes once did.
