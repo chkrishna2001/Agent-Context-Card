@@ -1,0 +1,10 @@
+[
+  {
+    "id": "sympy-18211",
+    "configPath": "evaluation/benchmarks/swebench-verified-sympy-18211.json"
+  },
+  {
+    "id": "sympy-21930",
+    "configPath": "evaluation/benchmarks/swebench-verified-sympy-21930.json"
+  }
+]

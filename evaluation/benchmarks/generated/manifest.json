@@ -1,0 +1,152 @@
+[
+  {
+    "id": "sphinx-doc__sphinx-8593",
+    "configPath": "evaluation/benchmarks/generated/sphinx-doc__sphinx-8593.json",
+    "repo": "sphinx-doc/sphinx",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "pylint-dev__pylint-4551",
+    "configPath": "evaluation/benchmarks/generated/pylint-dev__pylint-4551.json",
+    "repo": "pylint-dev/pylint",
+    "difficulty": "1-4 hours"
+  },
+  {
+    "id": "sympy__sympy-22714",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-22714.json",
+    "repo": "sympy/sympy",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-13658",
+    "configPath": "evaluation/benchmarks/generated/django__django-13658.json",
+    "repo": "django/django",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "sympy__sympy-15345",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-15345.json",
+    "repo": "sympy/sympy",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "sympy__sympy-15976",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-15976.json",
+    "repo": "sympy/sympy",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "matplotlib__matplotlib-20859",
+    "configPath": "evaluation/benchmarks/generated/matplotlib__matplotlib-20859.json",
+    "repo": "matplotlib/matplotlib",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-11119",
+    "configPath": "evaluation/benchmarks/generated/django__django-11119.json",
+    "repo": "django/django",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-14580",
+    "configPath": "evaluation/benchmarks/generated/django__django-14580.json",
+    "repo": "django/django",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "pydata__xarray-6744",
+    "configPath": "evaluation/benchmarks/generated/pydata__xarray-6744.json",
+    "repo": "pydata/xarray",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "django__django-14539",
+    "configPath": "evaluation/benchmarks/generated/django__django-14539.json",
+    "repo": "django/django",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-13925",
+    "configPath": "evaluation/benchmarks/generated/django__django-13925.json",
+    "repo": "django/django",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "sympy__sympy-15809",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-15809.json",
+    "repo": "sympy/sympy",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "matplotlib__matplotlib-24570",
+    "configPath": "evaluation/benchmarks/generated/matplotlib__matplotlib-24570.json",
+    "repo": "matplotlib/matplotlib",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-15863",
+    "configPath": "evaluation/benchmarks/generated/django__django-15863.json",
+    "repo": "django/django",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "matplotlib__matplotlib-24627",
+    "configPath": "evaluation/benchmarks/generated/matplotlib__matplotlib-24627.json",
+    "repo": "matplotlib/matplotlib",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "django__django-15987",
+    "configPath": "evaluation/benchmarks/generated/django__django-15987.json",
+    "repo": "django/django",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "sphinx-doc__sphinx-8551",
+    "configPath": "evaluation/benchmarks/generated/sphinx-doc__sphinx-8551.json",
+    "repo": "sphinx-doc/sphinx",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "django__django-13516",
+    "configPath": "evaluation/benchmarks/generated/django__django-13516.json",
+    "repo": "django/django",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "sympy__sympy-15875",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-15875.json",
+    "repo": "sympy/sympy",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-13670",
+    "configPath": "evaluation/benchmarks/generated/django__django-13670.json",
+    "repo": "django/django",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "astropy__astropy-13033",
+    "configPath": "evaluation/benchmarks/generated/astropy__astropy-13033.json",
+    "repo": "astropy/astropy",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "sympy__sympy-15017",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-15017.json",
+    "repo": "sympy/sympy",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "pydata__xarray-4094",
+    "configPath": "evaluation/benchmarks/generated/pydata__xarray-4094.json",
+    "repo": "pydata/xarray",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-12708",
+    "configPath": "evaluation/benchmarks/generated/django__django-12708.json",
+    "repo": "django/django",
+    "difficulty": "1-4 hours"
+  }
+]

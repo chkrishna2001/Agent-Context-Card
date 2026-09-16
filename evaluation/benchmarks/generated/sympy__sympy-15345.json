@@ -1,0 +1,63 @@
+{
+  "name": "SWE-bench Verified sympy__sympy-15345",
+  "model": "ai-inference-router/gemma4:31b",
+  "thinking": "off",
+  "timeoutMs": 1200000,
+  "noContextFiles": true,
+  "benchmark": {
+    "dataset": "SWE-bench/SWE-bench_Verified",
+    "split": "test",
+    "instanceId": "sympy__sympy-15345",
+    "difficulty": "<15 min fix",
+    "timeoutSeconds": 1800,
+    "cacheLevel": "env"
+  },
+  "workspace": {
+    "type": "git",
+    "source": "https://github.com/sympy/sympy.git",
+    "cache": ".agent-context-card/git-cache/sympy.git",
+    "commit": "9ef28fba5b4d6d0168237c9c005a550e6dc27d81",
+    "timeoutMs": 300000
+  },
+  "variants": [
+    {
+      "name": "baseline",
+      "extension": false,
+      "sessionMode": "continue"
+    },
+    {
+      "name": "card",
+      "extension": true,
+      "sessionMode": "continue"
+    }
+  ],
+  "turns": [
+    {
+      "name": "plan",
+      "prompt": "Plan sympy__sympy-15345. Inspect the repository and produce a concise implementation and validation plan. Do not modify files.\n\nIssue:\nmathematica_code gives wrong output with Max\nIf I run the code\r\n\r\n```\r\nx = symbols('x')\r\nmathematica_code(Max(x,2))\r\n```\r\n\r\nthen I would expect the output `'Max[x,2]'` which is valid Mathematica code but instead I get `'Max(2, x)'` which is not valid Mathematica code.",
+      "expect": {
+        "taskId": "sympy__sympy-15345",
+        "resume": false,
+        "zeroHotEvidence": false
+      }
+    },
+    {
+      "name": "implement",
+      "prompt": "Implement sympy__sympy-15345 with a minimal production fix.\n\nIssue:\nmathematica_code gives wrong output with Max\nIf I run the code\r\n\r\n```\r\nx = symbols('x')\r\nmathematica_code(Max(x,2))\r\n```\r\n\r\nthen I would expect the output `'Max[x,2]'` which is valid Mathematica code but instead I get `'Max(2, x)'` which is not valid Mathematica code.\n\nInspect current source before editing and run the most relevant focused test available.",
+      "expect": {
+        "taskId": "sympy__sympy-15345",
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    },
+    {
+      "name": "review",
+      "prompt": "Review sympy__sympy-15345 against the issue. Inspect the current diff and run only a bounded direct reproduction or one focused test; do not run broad suites or install dependencies. Fix only correctness problems you find. The official benchmark harness will perform final grading.",
+      "expect": {
+        "taskId": "sympy__sympy-15345",
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    }
+  ]
+}

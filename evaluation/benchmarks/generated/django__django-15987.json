@@ -1,0 +1,63 @@
+{
+  "name": "SWE-bench Verified django__django-15987",
+  "model": "ai-inference-router/gemma4:31b",
+  "thinking": "off",
+  "timeoutMs": 1200000,
+  "noContextFiles": true,
+  "benchmark": {
+    "dataset": "SWE-bench/SWE-bench_Verified",
+    "split": "test",
+    "instanceId": "django__django-15987",
+    "difficulty": "<15 min fix",
+    "timeoutSeconds": 1800,
+    "cacheLevel": "env"
+  },
+  "workspace": {
+    "type": "git",
+    "source": "https://github.com/django/django.git",
+    "cache": ".agent-context-card/git-cache/django.git",
+    "commit": "7e6b537f5b92be152779fc492bb908d27fe7c52a",
+    "timeoutMs": 300000
+  },
+  "variants": [
+    {
+      "name": "baseline",
+      "extension": false,
+      "sessionMode": "continue"
+    },
+    {
+      "name": "card",
+      "extension": true,
+      "sessionMode": "continue"
+    }
+  ],
+  "turns": [
+    {
+      "name": "plan",
+      "prompt": "Plan django__django-15987. Inspect the repository and produce a concise implementation and validation plan. Do not modify files.\n\nIssue:\nFixture dirs duplicates undetected if dir is Path instance\nDescription\n\t\nWhen FIXTURE_DIRS contains Path instances, the duplicate check in loaddata does not detect duplicates.",
+      "expect": {
+        "taskId": "django__django-15987",
+        "resume": false,
+        "zeroHotEvidence": false
+      }
+    },
+    {
+      "name": "implement",
+      "prompt": "Implement django__django-15987 with a minimal production fix.\n\nIssue:\nFixture dirs duplicates undetected if dir is Path instance\nDescription\n\t\nWhen FIXTURE_DIRS contains Path instances, the duplicate check in loaddata does not detect duplicates.\n\nInspect current source before editing and run the most relevant focused test available.",
+      "expect": {
+        "taskId": "django__django-15987",
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    },
+    {
+      "name": "review",
+      "prompt": "Review django__django-15987 against the issue. Inspect the current diff and run only a bounded direct reproduction or one focused test; do not run broad suites or install dependencies. Fix only correctness problems you find. The official benchmark harness will perform final grading.",
+      "expect": {
+        "taskId": "django__django-15987",
+        "zeroHotEvidence": true,
+        "planRevision": 1
+      }
+    }
+  ]
+}
