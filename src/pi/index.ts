@@ -420,6 +420,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         continue;
       const details = entry.data as TaskAnchorDetails | undefined;
       if (details?.anchor) anchor = details.anchor;
+      if (details?.taskId !== undefined) taskId = details.taskId;
     }
     for (const entry of branch) {
       if (entry.type !== "custom") continue;
@@ -545,7 +546,11 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     const next = createTaskAnchor(text, currentTurn);
     if (!next.goal) return false;
     anchor = next;
-    pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, { anchor, reset });
+    pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, {
+      anchor,
+      reset,
+      taskId,
+    });
     return true;
   };
 
@@ -569,6 +574,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, {
         anchor,
         reset: true,
+        taskId,
       });
       persistPlanState();
       persistCardState();
@@ -1189,6 +1195,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       pi.appendEntry<TaskAnchorDetails>(ANCHOR_ENTRY_TYPE, {
         anchor,
         reset: true,
+        taskId,
       });
       persistPlanState();
       ctx.ui.notify("Context card reset. Stored snapshot kept.", "info");

@@ -38,6 +38,14 @@ export interface TaskAnchor {
 export interface TaskAnchorDetails {
   anchor: TaskAnchor;
   reset: boolean;
+  // Persisted alongside the anchor (not just on a later-pinned plan or
+  // resume snapshot) so a reconnect that happens before any plan is ever
+  // pinned - a real Pi session_start can fire more than once within what
+  // looks like a single continuing session - still has something to
+  // restore taskId from. Previously only PLAN_ENTRY_TYPE/RESUME_ENTRY_TYPE
+  // carried taskId, so reconstruct() silently and permanently lost it on
+  // any such reconnect before a plan existed.
+  taskId?: string;
 }
 
 export interface PinnedPlan {

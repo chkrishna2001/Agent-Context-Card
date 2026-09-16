@@ -313,6 +313,31 @@ describe("Pi adapter", () => {
     }
   });
 
+  test("a reconnect before any plan is ever pinned still keeps the task ID", async () => {
+    // Traced live: a flaky provider caused Pi's session_start to fire more
+    // than once within one nominal session before the model ever pinned a
+    // plan (update_card kept getting called without real plan content).
+    // taskId was previously only persisted via a pinned plan or a resume
+    // snapshot - reconstruct() had nothing to restore it from and silently,
+    // permanently lost it, even though the goal (from the same input, same
+    // moment) survived fine via the anchor entry.
+    const extension = harness();
+    await extension.start();
+    await extension.input("Plan JIRA-123");
+    let output = await extension.project([
+      { role: "user", content: "Plan JIRA-123", timestamp: 1 },
+    ]);
+    expect(JSON.stringify(output?.messages[0])).toContain("TASK ID: JIRA-123");
+
+    // Reconnect - no turnEnd/plan pin happened yet, matching the traced
+    // failure exactly.
+    await extension.tree();
+    output = await extension.project([
+      { role: "user", content: "Plan JIRA-123", timestamp: 1 },
+    ]);
+    expect(JSON.stringify(output?.messages[0])).toContain("TASK ID: JIRA-123");
+  });
+
   test("a short affirmative reply does not reset the task anchor", async () => {
     const extension = harness();
     await extension.start();
