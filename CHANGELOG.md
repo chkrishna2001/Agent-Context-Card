@@ -6,8 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-16
+
 ### Added
 
+- `bash`/grep near-duplicate detection (`src/core/command-signature.ts`):
+  normalizes a conservative allow-list of search commands (`grep`/`rg`/
+  `ag`/`find -name`) to `{verb, pattern}`, ignoring the trailing arguments
+  (e.g. target file lists) that vary between calls. Traced a live session
+  where `grep -r "def as_set" file1.py file2.py ...` fired 5 times in 6
+  seconds with a shifting file list, never byte-identical - the
+  exact-signature hard block and the read-specific range-containment check
+  both missed it. Feeds the existing block-and-reflect path only, never the
+  success cache, since a command's result isn't provably reusable across
+  argument variation the way a read's content is.
 - When the hard repeat-block engages, escalate with a real user-turn
   message (`pi.sendUserMessage`, not the existing custom/steer nudge
   channel) asking the model to name what it's trying to achieve before
@@ -72,6 +84,63 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   downstream token measurement for the rest of that session. Now runs
   `git init` plus an initial commit (committer identity passed via env, not
   dependent on the host's global git config) in the copied workspace.
+- `grade-swebench.mjs`'s default `--wsl` venv path (`~/swebench-venv/...`)
+  was single-quoted for the shell call, which suppresses bash's own tilde
+  expansion - every `--wsl` grading run failed with "No such file or
+  directory" even though the venv itself was fine. New tilde-aware quoting
+  leaves a leading `~/` unquoted (so the shell still expands it) while
+  still quoting the rest.
+- Both `evaluation/benchmarks/swebench-verified-sympy-*.json` configs, plus
+  `pi-plan-phase-experiment.json` and `pi-ten-turn-plan-framing.json`, had
+  the same stale `resume: true` expectation on non-first turns already
+  fixed in `pi-ten-turn-mixed.json` above - `resume` checks for a `"load"`
+  task-state-audit op, which structurally never fires under `sessionMode:
+"continue"`. Dropped it everywhere it's provably unsatisfiable.
+- `taskId` was only ever persisted on a pinned plan or a resume snapshot,
+  never alongside the task anchor itself, even though both are derived
+  from the same input at the same moment. Traced a live OpenRouter run
+  where Pi's `session_start` fired three times within one nominal session
+  (the harness reconnecting mid-run) before any plan had been pinned -
+  `reconstruct()` had nothing to restore `taskId` from and silently,
+  permanently lost it for the rest of the session, even though the task's
+  identity hadn't changed. Now persisted on the anchor entry too and
+  restored the same way `anchor.goal` already is.
+
+### Changed
+
+- `evaluation/results/evidence-ledger.json`: 9 entries the ledger's own
+  `methodologyCaveat` already disowns (used the removed `sessionMode:
+"fresh"` cross-session bridge) are now `claimable: false` with a
+  `staleness` note, instead of the flag silently never having been
+  corrected to match the caveat. Covers both `swebench-sympy` ids and the
+  entire `ten-turn-mixed`/`gpt-5-nano-plan-phase` family, which shared the
+  identical staleness but had never been flagged.
+
+### Evidence
+
+- The `mycoder-18211-n3` SWE-bench gate is now fully graded (previously 1
+  of 6 predictions): baseline 1/3 resolved, card 1/3 resolved - tied, not
+  a card advantage. Efficiency gains do not currently imply a correctness
+  edge on this instance.
+- `ai-inference-router/mycoder` on `pi-ten-turn-mixed.json`, n=3: 3/3
+  correct both variants, zero assertion failures, a tight -24.7% to -17.2%
+  provider-input range (median -19.6%) - real and consistent, though well
+  below this project's historical -60%-class headline numbers, which the
+  Changed section above now marks non-claimable.
+- Major open finding, not yet resolved: on `anthropic/claude-haiku-4-5`,
+  card's raw provider-input tokens came out roughly tied with baseline,
+  but real dollar cost was 5-19x higher, because Anthropic's prompt cache
+  never reported a read for card's requests despite cache writes
+  succeeding every call - while baseline, under the identical account,
+  auth, and model, got substantial cache hits. Two concrete fixes (pin
+  context-retirement decisions to turn boundaries; eliminate a
+  two-consecutive-user-message structural quirk) were built, verified
+  correct against real request-payload instrumentation, and confirmed not
+  to change the outcome; both were reverted. Full trail in
+  `docs/notes/haiku-cache-defeat-2026-09-16.md`. mycoder and an initial
+  OpenRouter data point (`qwen/qwen3-coder`, -70% to -80% tokens, with real
+  cache-read hits) are both unaffected by this specific problem - it has
+  only been observed on genuine Anthropic prompt caching so far.
 
 ## [0.5.0] - 2026-09-01
 
@@ -359,7 +428,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Experimental core API export for researchers.
 - Focused tests, product documentation, design history, and measured A/B results.
 
-[Unreleased]: https://github.com/chkrishna2001/Agent-Context-Card/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/chkrishna2001/Agent-Context-Card/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.6.0
 [0.5.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.5.0
 [0.4.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.4.0
 [0.3.0]: https://github.com/chkrishna2001/Agent-Context-Card/releases/tag/v0.3.0
