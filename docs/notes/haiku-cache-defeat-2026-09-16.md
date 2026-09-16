@@ -172,11 +172,71 @@ per-provider, going forward, not inferred from token counts alone. mycoder
 (and presumably any router without strict Anthropic-style prefix caching)
 remains unaffected by this specific problem.
 
+## External research: is this a known phenomenon?
+
+Searched for prior art rather than keep guessing from this codebase alone.
+Found real, relevant context, but it doesn't close the gap — worth reading
+carefully rather than treating as a confirmed root cause.
+
+**Confirmed Anthropic policy (public, high confidence)**: since February
+2026 Anthropic's Commercial Terms explicitly prohibit using Claude
+subscription OAuth tokens in any non-Anthropic-owned product/tool/SDK.
+Technical enforcement (outright token rejection) rolled out in stages
+through the year (~Feb 20, broader ~Apr 4). Anthropic's own stated
+rationale explicitly names caching: first-party tools like Claude Code are
+"engineered to maximize prompt cache hit rates," while third-party tools
+"often fail to leverage these cache optimizations, resulting in full
+compute costs for every model invocation." A later reported partial
+"reinstatement" moved third-party programmatic usage onto separate,
+capped, non-rollover monthly credits rather than the flat subscription
+pool (though a search on 2026-09-16 suggests that specific credit-pool
+mechanism was announced for 2026-06-15 then paused, and Agent SDK usage
+may still draw from the regular subscription pool as of the pause — the
+exact current billing mechanics for this project's own account were not
+independently confirmed).
+
+**Independently corroborated symptom, three unrelated projects, same
+signature**: `cache_creation`/`cacheWrite` growing every request while
+`cache_read`/`cacheRead` stays at 0 — [CLIProxyAPI #5730](https://github.com/router-for-me/CLIProxyAPI/issues/5730)
+("cloaked (non-Claude-Code) clients: prompt cache is written on every
+request and never read back"), [llmgateway #3918](https://github.com/theopenco/llmgateway/issues/3918)
+(plain API key, no OAuth at all, through a gateway — same symptom),
+[openclaw #19534](https://github.com/openclaw/openclaw/issues/19534).
+Each project's own self-diagnosed root cause (an unstable proxy-generated
+billing-fingerprint block; dynamic timestamps in a system prompt) does
+**not** match this project's case — `system`, `tools`, and the message
+prefix were all independently verified byte-stable here, ruling those
+specific mechanisms out for card's requests specifically.
+
+**Where the research explanation falls short — the real remaining gap**:
+none of the above explains the actual observed asymmetry. If Anthropic
+categorically degraded caching for this traffic _category_ (OAuth,
+third-party-identified, whatever the mechanism), **baseline should show
+the identical zero-cache-read pattern under the exact same account, auth,
+and model** — and it doesn't; baseline gets substantial real cache hits
+(1.9M, 315K, 3.2M tokens) in the same campaign. The external research
+explains why a mechanism like this is plausible and documented to exist in
+general; it does not explain why card's requests specifically get denied
+caching while baseline's, under identical auth, do not. That asymmetry
+remains the actual open question — everything else here is useful
+background, not a resolution.
+
 ## What's next, if anyone picks this back up
 
 - Don't re-attempt either of the two ruled-out fixes without new evidence.
-- If pursued further, the highest-value next step is probably getting
-  Anthropic-side account/support visibility into why cache lookups aren't
+- **Next planned step (2026-09-16)**: broaden the campaign to OpenRouter's
+  free-tier models (19 `:free`-suffixed, zero-cost entries in
+  `node_modules/@earendil-works/pi-ai/dist/providers/openrouter.models.js`,
+  e.g. `qwen/qwen3-coder:free`, `google/gemma-4-31b-it:free`) — zero API
+  cost, a third provider family entirely distinct from both the
+  Anthropic-OAuth path and the `ai-inference-router` path already tested,
+  useful for seeing whether card's efficiency/behavior holds up broadly and
+  whether any OpenRouter-routed model shows the same cache-write-only
+  signature (most won't implement Anthropic-style caching at all, which is
+  itself a useful negative data point, not a null result).
+- If the Anthropic-specific mystery is pursued further, the highest-value
+  next step is probably getting Anthropic-side account/support visibility
+  into why cache lookups aren't
   matching for these specific requests, rather than more client-side
   guessing — every angle checkable from this codebase has been checked.
 - The original step-5 campaign (mycoder + Haiku, both fixtures, n≥3) is
