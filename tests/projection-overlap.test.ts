@@ -802,7 +802,8 @@ describe("disuse retirement", () => {
   test("a read nothing ever comes back to retires; one referenced again does not", () => {
     const readX = tool("1", "read", { path: "src/x.ts" });
     const readY = tool("2", "read", { path: "src/y.ts" });
-    const mentionY = tool("3", "shell_command", { command: "cat src/y.ts" });
+    const editUnrelated = tool("3", "edit", { path: "src/unrelated.ts" });
+    const mentionY = tool("4", "shell_command", { command: "cat src/y.ts" });
 
     const messages: ContextMessage<string>[] = [
       user("Investigate"),
@@ -810,6 +811,11 @@ describe("disuse retirement", () => {
       resultFor(readX, "x-contents"),
       assistant("read-y", [readY]),
       resultFor(readY, "y-contents"),
+      // Disuse is gated on real forward progress (see consumedByDisuse) -
+      // without a mutation somewhere after the read, neither read is
+      // disuse-eligible regardless of later reference.
+      assistant("edit-unrelated", [editUnrelated]),
+      resultFor(editUnrelated, "ok"),
       assistant("mention-y", [mentionY]),
       resultFor(mentionY, "y again"),
       doneText("Done investigating"),
@@ -829,8 +835,9 @@ describe("disuse retirement", () => {
 
   test("retirement is reversible: the same read stays active once something later references it", () => {
     const readX = tool("1", "read", { path: "src/x.ts" });
-    const noise = tool("2", "shell_command", { command: "cat unrelated.ts" });
-    const mentionXLate = tool("3", "shell_command", {
+    const editUnrelated = tool("2", "edit", { path: "src/unrelated.ts" });
+    const noise = tool("3", "shell_command", { command: "cat unrelated.ts" });
+    const mentionXLate = tool("4", "shell_command", {
       command: "cat src/x.ts",
     });
 
@@ -838,6 +845,11 @@ describe("disuse retirement", () => {
       user("Investigate"),
       assistant("read-x", [readX]),
       resultFor(readX, "x-contents"),
+      // A mutation to satisfy disuse's forward-progress gate, common to
+      // both branches, so the branches differ only in whether src/x.ts is
+      // referenced again - the thing this test is actually about.
+      assistant("edit-unrelated", [editUnrelated]),
+      resultFor(editUnrelated, "ok"),
       assistant("noise", [noise]),
       resultFor(noise, "noise-out"),
     ];
@@ -863,12 +875,18 @@ describe("disuse retirement", () => {
 
   test("a disuse-eligible read is kept when the current turn text references its path", () => {
     const readX = tool("1", "read", { path: "src/x.ts" });
-    const noise = tool("2", "shell_command", { command: "cat unrelated.ts" });
+    const editUnrelated = tool("2", "edit", { path: "src/unrelated.ts" });
+    const noise = tool("3", "shell_command", { command: "cat unrelated.ts" });
 
     const messages: ContextMessage<string>[] = [
       user("Check src/x.ts against the schema"),
       assistant("read-x", [readX]),
       resultFor(readX, "x-contents"),
+      // Satisfies disuse's forward-progress gate so this actually exercises
+      // the currentTurnText guard, rather than being kept for the unrelated
+      // reason that no mutation has happened yet.
+      assistant("edit-unrelated", [editUnrelated]),
+      resultFor(editUnrelated, "ok"),
       assistant("noise", [noise]),
       resultFor(noise, "noise-out"),
     ];
@@ -899,6 +917,37 @@ describe("disuse retirement", () => {
     const projected = projectContext(messages);
     const texts = projected.messages.map((m) => String(m));
     expect(texts.some((t) => t === "tools:read-x")).toBe(true);
+  });
+
+  test("disuse does not retire anything before a mutation has happened anywhere in the session", () => {
+    const readX = tool("1", "read", { path: "src/x.ts" });
+    const readY = tool("2", "read", { path: "src/y.ts" });
+    const noise = tool("3", "shell_command", { command: "cat unrelated.ts" });
+
+    const messages: ContextMessage<string>[] = [
+      user("Investigate"),
+      assistant("read-x", [readX]),
+      resultFor(readX, "x-contents"),
+      assistant("read-y", [readY]),
+      resultFor(readY, "y-contents"),
+      assistant("noise", [noise]),
+      resultFor(noise, "noise-out"),
+      doneText("Still investigating"),
+    ];
+
+    // Neither read is ever referenced again, and there's genuine later
+    // activity (grace is observed) - under the old disuse rule both would
+    // retire. A controlled evaluation against production sessions found
+    // this specific pattern (pure investigation, zero mutations) is exactly
+    // where disuse's accuracy collapsed (8-38%, vs 88-96% once at least one
+    // edit had landed): the session hasn't "moved on" from needing this
+    // evidence, it's stuck re-deriving it. Until a mutation happens
+    // anywhere, disuse must not fire.
+    const projected = projectContext(messages);
+    const texts = projected.messages.map((m) => String(m));
+    expect(texts.some((t) => t === "tools:read-x")).toBe(true);
+    expect(texts.some((t) => t === "tools:read-y")).toBe(true);
+    expect(projected.retired.disused).toBe(0);
   });
 });
 
@@ -997,11 +1046,12 @@ describe("reads via bash", () => {
   test("a bash cat nothing ever comes back to retires by disuse, same as a dedicated read", () => {
     const catX = tool("1", "bash", { command: "cat src/x.ts" });
     const catY = tool("2", "bash", { command: "cat src/y.ts" });
+    const editUnrelated = tool("3", "edit", { path: "src/unrelated.ts" });
     // A different command than catY's (not "cat" again) so this is a
     // genuine second reference, not a literal duplicate round that would
     // collapse into catY via fingerprint dedup instead of exercising
     // disuse's "referenced again" check.
-    const mentionY = tool("3", "bash", { command: "less src/y.ts" });
+    const mentionY = tool("4", "bash", { command: "less src/y.ts" });
 
     const messages: ContextMessage<string>[] = [
       user("Investigate"),
@@ -1009,6 +1059,10 @@ describe("reads via bash", () => {
       resultFor(catX, "x-contents"),
       assistant("cat-y", [catY]),
       resultFor(catY, "y-contents"),
+      // Disuse's forward-progress gate: without this, neither read is
+      // disuse-eligible regardless of later reference.
+      assistant("edit-unrelated", [editUnrelated]),
+      resultFor(editUnrelated, "ok"),
       assistant("mention-y", [mentionY]),
       resultFor(mentionY, "y-contents-again"),
     ];
