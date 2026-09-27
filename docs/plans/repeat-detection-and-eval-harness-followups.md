@@ -1,276 +1,320 @@
 # Repeat-detection & eval-harness follow-ups
 
-**Status (2026-09-16): threads #1-#4 below are done, committed, and pushed
-to `origin/main` (commits `38a3cdd`, `4f8a773`, `b8f8501`, `b39b8f8`).
-Working tree is clean. The 2026-09-16 session also ran the step-5 repeat
-campaign partway (mycoder both fixtures done; Haiku SWE-bench done, Haiku
-ten-turn-mixed not yet run) and discovered + fully investigated a major,
-still-unresolved finding: on Haiku 4.5, card's real dollar cost is 5-19x
-baseline's despite tied raw token counts, because Anthropic's prompt cache
-never reports a read for card's requests even though they're provably
-byte-stable. Two candidate fixes were built, tested, and confirmed NOT to
-help, then reverted (never committed) — full trail in
-`docs/notes/haiku-cache-defeat-2026-09-16.md`. Read that before
-re-attempting anything cache-related.** Safe to build on; nothing here is
-half-finished code.
+**Status (2026-09-27): the 2026-09-15/16 threads (#1, #4-#7) are done,
+committed, and pushed. The 2026-09-16 Haiku cache-cost mystery (thread #5)
+is still open and untouched this session — read
+`docs/notes/haiku-cache-defeat-2026-09-16.md` before touching anything
+cache-related. This session (2026-09-27) reworked the repeat-detection
+mechanism itself (threads #2/#3 below are rewritten, not just extended —
+the old "capped success cache" no longer exists at all), fixed two real
+bugs found via live SWE-bench runs, unified staleness detection onto
+`src/core/projection.ts`'s `hotEvidence`, and ran the project's first
+controlled (n=3), automatically-graded evidence of the day. Committed and
+pushed: `9e8001d` (the code/doc changes) and `17515ba` (an unrelated batch
+of pre-existing SWE-bench pilot-campaign tooling/results that predated this
+session but got committed in the same pass at the user's request). Working
+tree is clean. Safe to build on.**
 
 ## What we're working on
 
 `agent-context-card` is a Pi coding-agent extension whose thesis is: an
 agent can work with a much smaller context than "resend the whole
 conversation" by tracking task state deterministically (see `AGENTS.md` at
-repo root for the full mission/design). This session started from a user
-report — two real Pi sessions in an unrelated project (`CoreApps`) where a
-model got stuck resubmitting a blocked tool call forever — and expanded
-into (a) fixing three distinct ways a model could loop past every existing
-safety net, and (b) discovering and fixing two serious, previously-unknown
-bugs in the evaluation harness itself that had been silently invalidating
-measurement for an entire family of configs.
+repo root for the full mission/design). This thread is specifically about
+one supporting mechanism: stopping a model from looping — re-reading a file
+it already has, re-running the same search, or repeating an identical tool
+call — since an unbounded loop defeats context-bounding regardless of how
+good the retirement logic is.
 
-Hard constraint that shaped every fix here: **the project's own design
-philosophy rejects semantic/heuristic guessing in favor of deterministic,
-event-driven logic** (`AGENTS.md`, "Ideas considered and rejected as
-defaults"). Every fix below is a structural/deterministic check (exact
-signature, line-range containment, a hard count threshold), never a
-similarity score or classifier. This constraint is _why_ a "goal-switching"
-feature was discussed at length and explicitly **not** built — see below.
+Hard constraints that shaped every fix here:
+- **No semantic/heuristic guessing** (`AGENTS.md`, "Ideas considered and
+  rejected as defaults") — every repeat-detection check is structural
+  (exact signature, line-range containment, a hard count threshold), never
+  a similarity score.
+- **Staleness has exactly one source of truth** (new rule this session,
+  `AGENTS.md` under "Evidence leases" → "Single source of truth for
+  staleness"). Any code anywhere that needs to know whether previously-seen
+  evidence is stale must derive that from `src/core/projection.ts`'s
+  `hotEvidence`/mutation-gate logic — never invent an independent notion of
+  staleness in an adapter. This rule exists *because* violating it cost two
+  real bugs in one afternoon this session (see below) — read that AGENTS.md
+  section for the incident, it's the actual justification, not boilerplate.
 
 ## What we achieved
 
 All verified with the full validation suite (`bun test`, `bun x tsc
---noEmit`, `bun x eslint .`, `bun x prettier --check .`, `bun build
-index.ts --outdir dist --target node`) clean before each of the 6 commits
-below landed.
+--noEmit`, `bun x eslint .`, `bun x prettier --check .`) clean before
+committing, and every behavioral change was fault-injection tested (broke
+it on purpose, confirmed the relevant test failed, restored it) before
+being trusted.
 
-1. **Reflection escalation on the hard repeat-block**
-   (`src/pi/index.ts`, commit `d1d719b`). Traced two live sessions where a
-   model kept resubmitting an already-blocked call 8 and 20+ times because
-   the block's refusal is a tool-result the model reads as "that call
-   failed," not a steering signal. Fix: once the hard block engages, send a
-   real user-turn message (`pi.sendUserMessage`, not the pre-existing
-   custom/steer nudge channel) asking the model to name its goal, capped at
-   `HARD_BLOCK_REFLECTION_STREAK_CAP` (2) per stuck signature.
+1. **Reflection escalation on the hard repeat-block** (`src/pi/index.ts`,
+   commit `d1d719b`, 2026-09-15 — unchanged this session). Once the hard
+   block engages, `pi.sendUserMessage` asks the model to name its goal,
+   capped at `HARD_BLOCK_REFLECTION_STREAK_CAP` (2) per stuck signature.
 
-2. **Range-containment redundant-read detection**
-   (`src/core/intervals.ts`, new module; wired into `src/pi/index.ts`;
-   same commit). Traced a live Haiku 4.5 session: 27 reads of one 996-line
-   file, no two sharing the same `offset`/`limit`, so the exact-signature
-   hard block never engaged even once. Fix: track the union of line ranges
-   read per path (`mergeInterval`/`isFullyCovered`); block a read whose
-   entire requested range is already covered, regardless of exact
-   arguments. Deliberately **not** keyed on path alone — verified this
-   doesn't block legitimate sequential reads of a large file in new,
-   non-overlapping chunks (see `tests/pi-adapter.test.ts`, the three tests
-   added alongside this fix).
+2. **Repeat detection now blocks on the *first* repeat, uniformly, and
+   queries `hotEvidence` for staleness instead of tracking it locally**
+   (`src/pi/index.ts`, `src/core/projection.ts`, commit `9e8001d`,
+   2026-09-27 — this rewrites the 2026-09-15 range-containment mechanism
+   below). Three independent gates in the `tool_call` handler — exact
+   signature (`consecutiveAttemptCount`), line-range containment for reads
+   (`containedRepeatCounts`/`readCoverage`), and near-duplicate search
+   patterns (`bashPatternCounts`) — all key off one constant,
+   `HARD_BLOCK_REPEAT_THRESHOLD`, now **2** (was 3). Two real bugs were
+   found via live runs while tightening this, not by reasoning:
+   - **Off-by-one**: the contained-range counter only increments once a
+     read is *already* fully covered, so its first increment is really the
+     *second* occurrence — unlike the other two counters, which count the
+     establishing occurrence as 1. Comparing it to the same threshold
+     silently granted one extra free repeat. Traced live
+     (`ai-inference-router/mycoder`, `sympy__sympy-15345`): a model read
+     `sympy/printing/mathematica.py` in full three times, the first two
+     both executing for real, before the third finally blocked. Fixed:
+     that specific check now compares against
+     `HARD_BLOCK_REPEAT_THRESHOLD - 1`.
+   - **Mutation blindness**: the contained-range coverage map was tracked
+     purely by line/offset numbers with no idea a mutation had happened, so
+     a successful edit didn't invalidate coverage recorded before it. Live
+     consequence (same run, different repeat): a model's edit failed on
+     stale `oldText`, it tried to re-read the file to see why, and got
+     blocked as "already returned" by coverage from *before* its own
+     earlier successful edit — stuck retrying the same wrong edit three
+     more times. Fixed by replacing the adapter's own mutation-tracking
+     with a live check against `lastAudit.hotEvidence` (computed by
+     `src/core/projection.ts`, refreshed every provider request): a lease
+     that's absent or `state: "consumed"` means don't trust local coverage
+     for that path. `src/core/projection.ts`'s `filePath` is now exported
+     for this (ended up unused directly in `index.ts` after the refactor,
+     but kept exported — it's the shared canonical path-extraction utility,
+     consistent with the single-source-of-truth rule).
 
-3. **Capped the success cache** (`src/pi/index.ts`, same commit). Found
-   this by accident while stress-testing fix #2: a _separate_, pre-existing
-   uncommitted mechanism (`successfulCallCache`) served a cached result for
-   any repeat of a signature that had succeeded once, with **no cap at
-   all**. Traced a live run where this silently served the same bash
-   command 446 times over a full 20-minute turn timeout — worse than the
-   original bug, because a cache hit looks like a normal success to the
-   model, giving it zero signal to stop. Fix: gate the cache-hit path on
-   `consecutiveAttemptCount < HARD_BLOCK_REPEAT_THRESHOLD`; at or past the
-   threshold it now falls through to the block-and-reflect path instead of
-   bypassing it.
+3. **The old "capped success cache" no longer exists — removed entirely**
+   (`src/pi/index.ts`, commit `9e8001d`). Once repeat blocking fires on the
+   *first* repeat (see #2), a signature can never execute successfully
+   twice in a row — the gate blocks the second attempt before it happens.
+   That made the entire post-execution "did this succeed/fail twice"
+   escalation (`repeatedSuccessCount`, `repeatedFailureCount`,
+   `forcedDueToRepeatedSuccess`, `successfulCallCache`, and the
+   `update_card` "compelled by repeated success" steer message) unreachable
+   dead code. Deleted, along with its tests. If you're reading old context
+   that mentions "the success cache" or "repeatedSuccessCount" — it's gone,
+   this is why.
 
-4. **Session doctor** (`scripts/evaluation/session-doctor.mjs`, commit
-   `6970e9e`). `npm run doctor -- <session.jsonl>`, or `--last [n]` /
-   `--list [n]` to find recent session files without knowing the path
-   (searches `~/.pi/agent/sessions/**` and this repo's own
-   `.agent-context-card/e/**/s/*.jsonl`, excluding trace files by directory
-   convention). Reports tool-call tallies, a chronological list of
-   block/cache audit events, and read hotspots (path read 3+ times, with
-   offset/limit windows). Validated against two known fixtures from this
-   session (correctly reproduced both the 27-read hotspot and the 460-cache-hit
-   loop in one command each — see the working notes below for the exact
-   output).
+4. **Citation-forcing**: a forced `update_card` call is no longer treated
+   as resolved just because it produced *some* substance — it must cite at
+   least one currently-active read (`findings[].sources`) if any exist,
+   or the forcing streaks stay live and a targeted steer names the uncited
+   paths (`src/pi/index.ts`, `citationThin`, commit `9e8001d`). This is the
+   only mechanism that can retire a read before any mutation has landed
+   (`consumedByDisuse` is deliberately gated off until a mutation happens —
+   see the comment on it in `src/core/projection.ts` and the Laya
+   evaluation it cites), so it's the one lever available for pure
+   investigation turns specifically.
 
-5. **WSL Docker wired into SWE-bench grading**
-   (`scripts/evaluation/grade-swebench.mjs`, commit `b529945`). New `--wsl`
-   flag (explicit opt-in) routes grading through `wsl -- bash -c ...`
-   against a WSL-side Python venv instead of Windows-native, since this
-   machine has no native Windows Docker but does have a working WSL2 +
-   Docker install. Validated end-to-end manually first (built the sympy
-   Docker image, applied a real patch, got a genuine `resolved: false`
-   verdict) before wiring it into the script.
+5. **Session doctor**, **WSL Docker grading**, **the two eval-harness bugs
+   (card-snapshot directory, workspace git-isolation)**, and **the decision
+   not to build model-declared goal-switching** — all from 2026-09-15/16,
+   unchanged this session. Still accurate as originally written; see git
+   history for this file if you need the original prose.
 
-6. **Two eval-harness bugs found and fixed**:
-   - `run.mjs` never set `AGENT_CONTEXT_CARD_TEST_CARDS_DIR` when spawning
-     `pi`, so every eval run's card snapshots landed in the real, shared,
-     global `~/.agent-context-card/cards/` instead of the workspace-local
-     path the harness's own `readTaskSnapshots()` reads —
-     `snapshotPlanContains` assertions could never pass, for any config,
-     ever. Fixed in commit `bffdb3a`.
-   - `prepareWorkspace()` for `workspace.type: "copy"` never ran `git init`
-     in the copied destination. Since that destination is nested inside
-     this repo's own working tree, any `git diff`/`git status`/`git log`
-     the model ran searched upward and silently operated on **this repo's
-     own uncommitted state**. Traced live: a plain `git diff` during a
-     ten-turn-mixed "review" turn leaked 51,320 characters of this repo's
-     own unrelated diff into the model's context, inflating every
-     downstream token measurement for the rest of that run. Fixed in
-     commit `e65870d` (`git init` + `add -A` + a `--no-verify` commit,
-     committer identity passed via env, not host git config).
+6. **A real, controlled (n=3) result — the first non-anecdotal evidence
+   gathered this session.** Ran the checked-in
+   `evaluation/configs/pi-ten-turn-mixed.json` gate (`ai-inference-router/
+   gemma4:31b`, `--repeats 3`): **baseline 3/3 correct, card 3/3 correct**,
+   every one of card's 78 continuity assertions passed (26 × 3, zero
+   FAILs), provider-input tokens down a median **-16.8%** with the
+   reduction in the same direction on all 3 repeats (range -22.8% to
+   -12.6%, never crossing zero), tool/request counts statistically flat,
+   zero tool errors either side. Real caveats, not overclaimed: this
+   fixture never triggers a repeat in either variant (0 raw/same-state
+   repeated signatures throughout), so it doesn't exercise anything from
+   #2/#3 above — and `hotEvidence` stays tiny (0-3) the whole session, so
+   it doesn't stress-test "retire a lot while keeping quality" the way the
+   SWE-bench spot-checks below did. It proves the fixes cost nothing on
+   ordinary work; it isn't evidence about loops or large-scale retirement.
 
-   **Important dead end this surfaced, worth not repeating**: before
-   finding the workspace-isolation bug, a rerun of `pi-ten-turn-mixed.json`
-   showed card beating baseline by -60.0% total tokens — closely matching
-   the project's historical ~-60% to -79% numbers, which felt like
-   confirmation. It wasn't. The leaked diff inflated baseline
-   disproportionately (baseline has no mechanism to ever shed a stray
-   diff; card's retirement machinery apparently cleared it by the time it
-   mattered), flattering card's _relative_ number without reflecting real
-   behavior. **Do not trust an aggregate percentage that happens to match
-   a prior result as confirmation — check the per-turn breakdown for
-   spikes first.** The clean rerun after the fix shows a real, smaller,
-   still-genuine **-24.5%**, with per-turn cost flat across the whole
-   session instead of spiking on review/unrelated turns.
+7. **Ad hoc SWE-bench spot-checks (single-run each, `sympy__sympy-15345`,
+   not n≥3 — treat as diagnostic, not proof):**
+   - `ai-inference-router/mycoder`, after both bugs in #2 were fixed: card
+     completed all 3 turns, 69% of messages retired by the end (41/59),
+     produced a correct patch verified against the actual reproduction and
+     a passing `pytest` run. The one clean supporting anecdote for the
+     "retire a lot, keep quality" thesis.
+   - `ai-inference-router/gemma4:31b`, same instance: **baseline's
+     implement turn timed out** after 448 tool calls / 425 duplicates (20
+     min ceiling) — a full runaway loop, on baseline, with *zero* repeat
+     protection. Card completed in 131s with 3 duplicates, but **card's own
+     patch had a real regression** in this run — an imprecise edit
+     deleted the unrelated, pre-existing `_print_Derivative` method while
+     adding the requested `_print_Max`/`_print_Min` fix. Not caused by
+     retirement or repeat-detection; a plain bad edit-tool match, and
+     `pytest` didn't catch it because `test_mathematica.py` never exercises
+     `Derivative` printing. Fixed by hand in that run's disposable eval
+     workspace only (`.agent-context-card/e/.../w/`, gitignored, does not
+     persist) purely to verify the fix pattern — **not committed anywhere,
+     re-derive it if you need to see it again**: add back
+     `_print_Derivative` (the original 3-line body, `Hold[D[...]]`)
+     alongside the new `_print_Max`/`_print_Min` methods in
+     `sympy/printing/mathematica.py`.
+   - The takeaway that matters more than either single result: **model
+     behavior swings enough between runs of the identical config that a
+     single run proves nothing either direction** — baseline was clean and
+     fast on one run of this exact instance/model, then timed out
+     catastrophically on the next. This is why item #6 (controlled n=3) is
+     the one result worth citing, not these two.
 
-7. **Goal-switching: discussed at length, explicitly not built.** The
-   contaminated data above made it look like there was a ~31,000-token gap
-   on "unrelated" turns (e.g. `unrelated-package`) that a model-declared
-   goal-switching mechanism could capture — the idea being: let `update_card`
-   accept a `newGoal` field so the model can explicitly declare a goal
-   change (deterministic string comparison against the pinned anchor, no
-   harness-side semantic guessing — this was specifically designed to avoid
-   the false-positive problem that got the _old_ vocabulary-heuristic
-   task-switch detector removed entirely, see `AGENTS.md`). With the
-   workspace-isolation bug fixed, the real gap on the same fixture is a few
-   hundred to ~2,000 tokens — `unrelated-package` costs card 4,876 tokens,
-   barely above its own cheapest turns elsewhere in the same session
-   (4,264-4,541). **Conclusion: not worth building on this evidence.** If
-   this gets revisited, it needs a _longer, more realistic_ session (not
-   this 3-file fixture, which has a naturally tiny context ceiling) to
-   re-measure the gap before reconsidering.
+8. **A real methodology mistake this session, worth not repeating**: misread
+   a DuckDB query's truncated terminal display (a `···` row eliding the
+   middle of a result set) as proof that `progressStreak`'s
+   self-assessment nudge had *never* fired in a real run, and reported that
+   as a finding. Added a temporary diagnostic (`taskAudit` logging
+   `progressStreak`/`anchor.goal`/`progressStreakNudgeStreak` on every
+   `tool_execution_end`), reran, and the direct, untruncated evidence proved
+   the mechanism fires exactly as designed
+   (`streak=12; hasGoal=true; nudgeStreak=0` → `progress self-assessment
+   nudge fired; streak=12`, same handler invocation). The diagnostic was
+   removed after confirming this (not committed). **Lesson: when checking
+   whether a log line exists or not, `grep -c` the raw file directly —
+   never conclude absence from a display tool's own elision.**
 
 ## What's next
 
-Threads #1-#4 from the 2026-09-15 session are **done** (commits `38a3cdd`,
-`4f8a773`, `b8f8501`, `b39b8f8`):
-
-1. **`zeroHotEvidence`**: resolved against clean data (`mycoder-ten-turn-v4`
-   logs already on disk, no rerun needed) — all 5 applicable turns PASS,
-   27/27 assertions clean. The earlier mixed pattern was a symptom of the
-   workspace-isolation leak, already fixed; no `projection.ts` change
-   needed.
-2. **`bash`/grep near-duplicate detection**: built (`src/core/command-signature.ts`,
-   normalize-by-verb-and-pattern, conservative allow-list, false-positive
-   tests included) and wired into `src/pi/index.ts`'s block-and-reflect
-   path.
-3. **Evidence-ledger reconciliation**: all 9 entries the ledger's own
-   `methodologyCaveat` disowns (both `swebench-sympy` ids, plus the whole
-   `ten-turn-mixed`/`gpt-5-nano-plan-phase` family that had never been
-   flagged) now have `claimable: false` and a `staleness` note.
-   `tests/evaluation.test.ts` checks this structurally against the
-   caveat's own id-prefix rule.
-4. **Grading**: all 6 predictions from `mycoder-18211-n3` now officially
-   graded via `--wsl` (found and fixed a real bug along the way — the
-   default WSL venv path's `~` was being shell-quoted, suppressing bash's
-   tilde expansion). Result: **baseline 1/3 resolved, card 1/3 resolved —
-   tied**, not a card advantage.
-
-**New, open thread from the 2026-09-16 session** — see
-`docs/notes/haiku-cache-defeat-2026-09-16.md` for the complete trail:
-
-5. **Why Anthropic's prompt cache never reports a read for card's Haiku
-   requests.** Card's raw tokens were tied with baseline on Haiku SWE-bench,
-   but real dollar cost was 5-19x higher, because cache-read stayed ~0
-   while cache-write grew every request. Two concrete, code-grounded fixes
-   were built, tested with real request-payload instrumentation (not
-   guesswork), and **both confirmed not to help** — reverted. Every theory
-   checkable from this client's code has been checked and ruled out (see
-   the notes file's "Hypotheses checked and ruled out" section). What's
-   left needs either a token-level payload diff nobody's found yet, or
-   Anthropic-side account visibility this codebase can't produce. Also
-   still open: the Haiku leg of `pi-ten-turn-mixed.json` was never run
-   (this investigation superseded it) — budget for it separately if
-   resumed, expecting the same cost/token disconnect.
+1. **Thread #5 (Haiku cache-cost mystery) — still open, untouched this
+   session.** See `docs/notes/haiku-cache-defeat-2026-09-16.md`. Every
+   client-side theory has been checked and ruled out; next step needs
+   either a token-level payload diff nobody's found yet, or Anthropic-side
+   account visibility this codebase can't produce.
+2. **The Laya staleness-signal research — deferred again, not started.**
+   The open problem: `consumedByDisuse` is gated off until a mutation lands
+   because a controlled 155-read evaluation found its accuracy collapses to
+   8-38% without that gate (see the comment on `consumedByDisuse` in
+   `src/core/projection.ts`). Citation-forcing (#4 above) is the one
+   mechanism that doesn't need a mutation, but it depends on the model
+   actually populating `sources`, which has been unreliable historically.
+   No better zero-mutation signal has been proposed or tested yet.
+3. **Get a real n≥3 result on a fixture that actually stresses retirement
+   at scale**, not just the cheap `counter-mixed` gate. The SWE-bench
+   spot-checks are the only evidence of large-scale retirement
+   (item #6/#7 above) and they're single-run. Repeat the `mycoder` +
+   `sympy__sympy-15345` comparison (or a similar SWE-bench instance) 3
+   times each side and check whether the "69% retired, quality intact"
+   result holds up, or was itself a lucky draw the same way baseline's
+   clean-vs-timeout runs were.
+4. **A sharper test than "did it work end to end"**: nothing this session
+   isolated a case where retirement *itself* (not a bad edit, not model
+   variance) caused a quality regression — i.e., discarded evidence that
+   was later needed. That's the real failure mode this thesis needs to be
+   checked against, and it hasn't been looked for directly yet.
+5. Every SWE-bench spot-check today (mycoder and gemma4:31b both) FAILed
+   the `planRevision: 1` continuity assertion on turns 2/3, consistently,
+   across all three individual runs. It never happened on the ten-turn-mixed
+   gate (item #6, 0 FAILs). Not investigated — likely something about how
+   these specific SWE-bench configs' prompts interact with plan-promotion
+   detection, not a regression from this session's changes (it predates
+   them), but worth a look before trusting `planRevision` assertions on any
+   SWE-bench config.
 
 ## How to do it
 
-**Repo/tooling context**: Windows dev machine, WSL2 distro `Ubuntu-24.04`
-(the system default — no `-d` flag needed), with a working Docker Engine
-already installed _inside_ WSL only (not on the Windows host at all — that
-distinction is why grading needed `--wsl`). A Python venv already exists at
-`~/swebench-venv` inside WSL with `swebench==4.1.0` installed — don't
-recreate it, it's ready to use.
+**Repo/tooling context**: Windows dev machine, WSL2 distro `Ubuntu-24.04`,
+Docker inside WSL only. Local model catalog (what `ctx.model.contextWindow`
+actually resolves to, checked once this session after a real 88%-vs-0.888%
+misreading mistake — see "What we learned" below) lives at
+`~/.pi/agent/models.json`, *not* on the internet — e.g. `mycoder`'s
+declared context window there is `192000`, `gemma4:31b`'s is `262144`; they
+are declared separately, not aliases of each other, even though `mycoder`'s
+real backend model varies at runtime (documented elsewhere in this repo).
 
-**Doctor tool** (thread #1's starting point):
-
-```bash
-npm run doctor -- --list 10                    # see recent session files
-npm run doctor -- --last                       # analyze the most recent one
-npm run doctor -- <path/to/session.jsonl>       # analyze a specific one
-```
-
-**Rerunning the ten-turn-mixed gate** (thread #1):
+**Rerunning the controlled n=3 gate** (item #6 — the one result worth
+trusting):
 
 ```bash
 node scripts/evaluation/run.mjs \
   --config evaluation/configs/pi-ten-turn-mixed.json \
-  --model ai-inference-router/mycoder \
+  --repeats 3 \
   --output .agent-context-card/e/<pick-a-name>
 ```
 
-Then check `<output>/report.md`'s per-turn table for `zeroHotEvidence`
-PASS/FAIL by turn, and if still mixed, use `npm run doctor -- --last` (or
-point it at the relevant `s/*.jsonl` under `<output>/r2-1/s/`) to find what
-each failing turn's assertion condition (`firstProjection.hotEvidence`) was
-actually seeing — cross-reference against the `continuityAssertions`
-function in `scripts/evaluation/run.mjs` (search for `zeroHotEvidence`) to
-see exactly what's being checked.
+Check `<output>/report.md`'s "Repeated-run distributions" table for the
+median + range across the 3 repeats, and the per-repeat "Assertions"
+section for continuity PASS/FAIL. `--model` can override the config's
+default (`ai-inference-router/gemma4:31b`) if testing a different backend —
+note the OpenRouter-routed reasoning-marked models (e.g.
+`openrouter-pinned/google/gemma-4-31b-it`) reject `thinking: "off"` outright
+and need an explicit `--thinking low`.
 
-**Grading more predictions** (thread #4):
+**Rerunning a SWE-bench single-instance spot-check** (item #7 — diagnostic
+only, not proof; run it 3x per side before trusting a comparison):
 
 ```bash
-node scripts/evaluation/grade-swebench.mjs \
-  --report .agent-context-card/e/mycoder-18211-n3/report.json \
-  --wsl \
-  --variant baseline    # or: card   (grades every repeat of that variant; omit --variant for all 6)
+node scripts/evaluation/run.mjs \
+  --config evaluation/benchmarks/generated/sympy__sympy-15345.json \
+  --model ai-inference-router/mycoder \
+  --repeats 1 \
+  --output .agent-context-card/e/<pick-a-name>
 ```
 
-Each instance takes a few minutes (mostly Docker image build/pull on first
-use, cached after). Results land in
-`.agent-context-card/e/mycoder-18211-n3/swebench-grades/<timestamp>/`,
-one `report.json` per graded run in the official swebench format
-(`resolved`, `tests_status.FAIL_TO_PASS`/`PASS_TO_PASS`).
+Swap `--model` for `ai-inference-router/gemma4:31b` to reproduce the
+baseline-timeout / card-regression run from item #7. Check correctness by
+hand, not just the report table — `cd <output>/r*/w` (the per-variant
+workspace) and `git diff`, then actually run the reproduction case and any
+relevant test file; "ungraded" in the report table means exactly that, no
+official SWE-bench grading ran.
 
-**⚠ `.agent-context-card/` (including `e/`, all eval output, all
-predictions/reports referenced above) is gitignored** (`.gitignore` line 6) — everything under it is local-only on this machine and will not survive
-a fresh clone or a cleaned checkout. If those files are gone when you pick
-this up, regenerate with the commands above (same config, same fixture,
-fully reproducible) rather than treating their absence as a problem.
+**Adding the diagnostic pattern back** if a mechanism looks like it isn't
+firing (item #8's lesson): add a `taskAudit("forcing", "info", ...)` call
+logging the exact variables the fire condition depends on, right before the
+`if` check, in `src/pi/index.ts`'s `tool_execution_end` handler. Rerun,
+then:
 
-**DuckDB query pattern** that works reliably against these `.jsonl` session
-files (documented at length, with the exact error it avoids, in
-`docs/notes/hard-block-reflection-escalation-2026-09-14.md` under "Where
-this started"): isolate one JSON field per row in its own CTE before
-chaining a second `->>`/`json_each`, or DuckDB throws a spurious
-`Conversion Error: Failed to cast value to numerical` on rows with
-heterogeneous schemas.
+```bash
+grep -c "<your diagnostic marker string>" .agent-context-card/e/<run>/r*/s/*.jsonl
+```
 
-**Full raw trail**: `docs/notes/hard-block-reflection-escalation-2026-09-14.md`
-has the complete chronological investigation — exact numbers, every dead
-end, the full reasoning behind every design choice above. Read it before
-re-deriving anything that feels like it should already have an answer.
+Direct `grep` on the raw file, not a DuckDB query with a row-count limit —
+DuckDB's terminal display elides middle rows of a large result with a
+`···` placeholder, which reads exactly like "nothing here" if you're not
+watching for it. Remove the diagnostic once you've confirmed the answer;
+don't commit it.
 
-## What we learned from threads #1-#4 (all done)
+**⚠ `.agent-context-card/` is gitignored** — every eval run's output
+(reports, per-turn traces, session logs, the disposable git workspace) is
+local-only and will not survive a fresh clone. Regenerate with the commands
+above rather than expecting these files to exist.
 
-- **Thread #4's actual result matters most**: card is not a correctness
-  win on this instance — 1/3 vs 1/3, tied. Efficiency and correctness are
-  separate claims; don't let a favorable token percentage imply a
-  favorable resolution rate without checking.
-- **General bar, learned the hard way across both sessions**: before
-  trusting any aggregate percentage — especially one that happens to match
-  a prior expected result — check the per-turn/per-instance breakdown for
-  spikes, and check dollar cost separately from token count. A number that
-  "looks right" is not verification (this caught both the workspace-leak
-  contamination in the 2026-09-15 session and the Haiku caching disconnect
-  in the 2026-09-16 session).
+**Doctor tool** (still works, unchanged):
 
-**This doc will need updating again** once thread #5 (the Haiku caching
-mystery, see `docs/notes/haiku-cache-defeat-2026-09-16.md`) is resumed or
-resolved — update its status line and fold in what changed, rather than
-leaving it to go stale the way the eval configs it describes once did.
+```bash
+npm run doctor -- --list 10
+npm run doctor -- --last
+npm run doctor -- <path/to/session.jsonl>
+```
+
+## What we expect from it
+
+- **Don't trust a single eval run in either direction.** This session
+  found baseline clean-then-catastrophic on the identical config/model/
+  instance, and card efficient-then-regressed on the next run of the same
+  thing. Any future comparison needs n≥3 per side (matching the project's
+  own stated release-gate rule) before being cited as evidence, full stop —
+  the `counter-mixed` n=3 result (item #6) is the template.
+- **Don't accept a display tool's truncation as evidence of absence.**
+  `grep`/`wc -l` the raw file directly before concluding a log line never
+  appeared (item #8).
+- **Correctness needs to be checked by hand, not inferred from the report
+  table.** "ungraded" SWE-bench runs need a manual diff read + an actual
+  rerun of the reproduction case + the relevant test file — a clean-looking
+  diff can still delete an unrelated method (item #7's `_print_Derivative`
+  regression), and the project's own test suite for that file didn't catch
+  it because it never exercised the deleted method.
+- **Before adding a fourth independent repeat/staleness counter anywhere**,
+  don't. Extend or query `hotEvidence` (`src/core/projection.ts`) instead —
+  that's now a documented hard rule (`AGENTS.md`, "Single source of truth
+  for staleness"), added specifically because not following it cost two
+  real bugs in one session.
+- This doc will need updating again once either the Haiku thread, the Laya
+  research, or the "n=3 SWE-bench-scale retirement" item above actually
+  moves — update the status line and fold results into the relevant
+  numbered item in place, the way this revision folded today's fixes into
+  items #2/#3 instead of stacking a new dated section on top.
