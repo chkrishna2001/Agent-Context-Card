@@ -90,6 +90,30 @@ A successful file read stays live as exact evidence. After a successful mutation
 
 This rule is central. Do not replace active source evidence with a filename, hash, or retrieval hint.
 
+### Single source of truth for staleness
+
+Any code that needs to decide whether previously-seen evidence is stale —
+anywhere in the repository, including host adapters — must derive that
+decision from this file's evidence-lease logic (`hotEvidence`, the mutation
+gate above), never invent an independent rule.
+
+This was violated once and cost two live bugs in one session
+(2026-09-27, traced against a real `mycoder` SWE-bench run of
+`sympy__sympy-15345`). `src/pi/index.ts`'s read-repeat blocker maintained its
+own line/offset coverage map with its own hand-written mutation tracking,
+instead of consulting `hotEvidence`. That produced two separate failures in
+the same live run: an off-by-one (its counter had a different "does the
+first occurrence count as 1" convention than the other two repeat-detectors
+in the same file, silently granting one extra free repeat), and mutation
+blindness (a successful edit didn't invalidate coverage recorded before it,
+so a model whose edit failed on stale `oldText` was blocked from re-reading
+the file to see why, trapping it in a retry loop). Fixed by having the
+adapter's gate query `lastAudit.hotEvidence` directly at decision time — a
+lease that is absent or `state: "consumed"` means don't trust
+locally-recorded coverage — instead of tracking mutation-staleness a second
+time by hand. Do not add a fourth independent repeat/staleness counter
+anywhere; extend or query this one.
+
 ### Execution facts
 
 The card derives verified changes, validations, and unresolved failures from tool results. A matching later success clears a failure. Reads and searches are not repeated in the visible card.
@@ -109,6 +133,7 @@ The passive Pi adapter registers zero tools. A future change that registers a to
 - New hosts require their own adapters.
 - An adapter must not claim token savings unless the host can intercept or replace provider-bound context.
 - Runtime dependencies should remain zero unless a measured requirement justifies one.
+- Staleness/repeat/redundancy decisions belong to src/core/projection.ts's evidence-lease logic alone. An adapter may query it (e.g. via hotEvidence) but must never maintain its own independent notion of when evidence goes stale (see "Single source of truth for staleness" above).
 
 Current size:
 

@@ -81,18 +81,6 @@ const CARD_NUDGE_STREAK_CAP = 2;
 // pointed reason to ask now rather than waiting for the generic activity
 // counter to catch up.
 const COSTLY_READ_CHARS = 4000;
-// Two consecutive failures of the exact same call is already unambiguous -
-// a deterministic tool re-run against an unchanged repo can't succeed the
-// second time just because it's asked again.
-const REPEATED_FAILURE_NUDGE_THRESHOLD = 2;
-// Same reasoning as the failure case, mirrored for successes: two identical
-// successful calls in a row means the second one already told the agent
-// everything the first one did. This is deliberately signature equality,
-// not a classifier over what the command "looks like" (e.g. read-only vs.
-// discovery vs. verification) - a regex over command text can't keep up
-// with every language's test/run/verify invocation, but exact repetition
-// of name+arguments is unambiguous regardless of what the tool does.
-const REPEATED_SUCCESS_NUDGE_THRESHOLD = 2;
 // Steering the model away from a repeat - soft nudge, then forced
 // tool_choice - depends on the provider actually honoring what we send it.
 // Traced evidence from a live run: before_provider_request forced
@@ -101,8 +89,17 @@ const REPEATED_SUCCESS_NUDGE_THRESHOLD = 2;
 // and the same call then repeated 143 times before the turn timed out.
 // Steering can only ever be a request; this threshold is enforced in our
 // own code at the tool_call stage, before execution, independent of
-// anything the provider does with a forced tool_choice.
-const HARD_BLOCK_REPEAT_THRESHOLD = 3;
+// anything the provider does with a forced tool_choice. Set to 2 rather than
+// allowing one free repeat: a real production trace (2026-09-21 CoreApps
+// session) showed the same file read silently succeed a second (and for two
+// paths, a third) time from a since-removed result cache (app.routes.ts,
+// sthotra-reader.component.ts, index.html, app.config.ts, server.ts) before
+// the generic
+// pace signal below ever caught the pattern at 12 calls - every one of those
+// repeats looked like an ordinary success, with nothing telling the model
+// it already had this. Blocking (not caching) the very first repeat closes
+// that gap instead of accepting a round of silent re-presentation first.
+const HARD_BLOCK_REPEAT_THRESHOLD = 2;
 // The hard block's own refusal text is not a steering channel - it's a
 // tool-result the model reads as "that call failed," and evidence from two
 // live sessions shows a model stuck in this loop just resubmits the exact
@@ -113,6 +110,39 @@ const HARD_BLOCK_REPEAT_THRESHOLD = 3;
 // like the other nudge streaks so an unattended session doesn't manufacture
 // user turns indefinitely if even that doesn't land.
 const HARD_BLOCK_REFLECTION_STREAK_CAP = 2;
+
+// Tool-agnostic pace signal: consecutive tool calls - of any name, with any
+// arguments - since the last successful mutation (isMutationToolName) or the
+// last update_card call, whichever is more recent. Deliberately computed
+// from tool name alone, with no inspection of command text or arguments:
+// traced evidence from a SWE-bench pilot run (sympy__sympy-15345, card
+// variant, all 3 repeats) showed the agent looping 158-215 tool calls in one
+// implement turn, almost entirely `python -c "..."` introspection one-liners
+// probing a slightly different attribute each time (.printmethod, then
+// .__class__, then ._print) - never byte-identical, so the exact-signature
+// hard block (HARD_BLOCK_REPEAT_THRESHOLD above) only caught short
+// sub-bursts, and the near-duplicate bash-pattern detector (bashPatternKey
+// below) never engaged at all, since it only recognizes grep/rg/ag/find by
+// deliberate design (see src/core/command-signature.ts). Neither generalizes
+// to arbitrary exploration tools, and hand-writing a parser per tool is an
+// unbounded, losing task - so this trigger asks nothing about what a call
+// did, only how many calls have happened without one being a mutation or a
+// recorded update_card. It would fire identically whether the model were
+// exploring with grep, python -c, duckdb, curl, or anything else. Set a
+// little above CARD_ACTIVITY_NUDGE_THRESHOLD (10): that counter only
+// increments for a fixed allowlist of known tool names, so this coarser,
+// name-agnostic signal would otherwise fire even sooner on a mix of tool
+// names it doesn't recognize.
+const PROGRESS_STREAK_NUDGE_THRESHOLD = 12;
+// This is a heuristic signal about pace, not a certainty that any individual
+// call was redundant, so unlike the hard-block mechanisms above it stays a
+// soft, non-blocking nudge - the call still executes. Capped the same way
+// CARD_NUDGE_STREAK_CAP caps the card-activity nudge, so an unattended
+// session doesn't get nagged indefinitely if the model doesn't respond to
+// it; kept as its own constant rather than reusing CARD_NUDGE_STREAK_CAP
+// since this is an independently tunable concern (self-assessment of
+// progress, not forcing a recorded finding).
+const PROGRESS_STREAK_NUDGE_STREAK_CAP = 2;
 
 const READ_TOOL_NAMES = new Set(["read", "view_file"]);
 
@@ -199,60 +229,49 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let resumedProvenance: RepositoryProvenance | undefined;
   let planningTurn = false;
   let turnMutated = false;
+  // True once this turn's first before_provider_request has actually been
+  // sent. The forced-tool_choice path below must never engage on that very
+  // first request - it's the model's only chance to produce a free-text
+  // reply for this turn, and forcing tool_choice there suppresses that
+  // reply into thinking content / the forced call's own arguments instead
+  // of showing it, so the model ends up redoing the same analysis from
+  // scratch once steered back (confirmed against a live trace - see
+  // docs/notes/token-waste-strategy-2026-08-14.md). Mirrors the same
+  // "don't preempt a turn that hasn't produced anything yet" discipline the
+  // turn_end nudge below already applies via previousTurnSettled, just at
+  // the finer request grain forcing itself operates at, since a turn can
+  // span several provider requests before it settles.
+  let hasSentProviderRequestThisTurn = false;
   let cardState: CardState = emptyCardState();
   let cardActivitySinceUpdate = 0;
   let cardNudgeStreak = 0;
   let forceNudgeStreak = 0;
+  // Consecutive tool calls since the last successful mutation or
+  // update_card call - see PROGRESS_STREAK_NUDGE_THRESHOLD above. Kept
+  // separate from cardActivitySinceUpdate on purpose: that counter exists to
+  // force *recording* findings via update_card and only counts a fixed
+  // allowlist of known tool names; this one exists to prompt
+  // *self-assessment of progress* and counts every tool call regardless of
+  // name. They currently key off similar "has real work happened" signals
+  // but must stay independently tunable.
+  let progressStreak = 0;
+  let progressStreakNudgeStreak = 0;
   // True from the moment a forced update_card tool_choice is issued until
   // that call actually lands, so the tool's own handler can tell a real
   // response from a no-op one - forcing only compels the call, not its
   // content, so a thin response shouldn't reset the streaks as if it had
   // resolved anything.
   let awaitingForcedSubstance = false;
-  // Signature (tool name + arguments) of the most recent tool call args
-  // seen at tool_execution_start, keyed by call id so tool_execution_end -
-  // which carries no args of its own - can look up what actually ran.
-  const pendingCallSignatures = new Map<string, string>();
-  // Mirrors pendingCallSignatures's lifecycle (set at tool_execution_start,
-  // consumed and deleted at tool_execution_end) but carries the parsed
-  // path+range instead of a stringified signature, since tool_execution_end
-  // has no args of its own to recompute it from.
+  // Set at tool_execution_start, consumed and deleted at tool_execution_end,
+  // since that event carries no args of its own to recompute this from.
   const pendingReadRanges = new Map<
     string,
     { path: string; range: Interval } | undefined
   >();
-  // Cache of the last successful result for each unique tool call signature.
-  // This allows us to break "block loops" by providing the cached result
-  // instead of refusing the call when it repeats.
-  const successfulCallCache = new Map<string, any>();
-  // Tracks a call that just failed with the exact same signature as the
-  // one immediately before it - a model stuck repeating a broken command
-  // verbatim rather than adjusting. Resets on any success or on a
-  // differently-signatured failure, so it only fires on genuine
-  // back-to-back repetition, never accumulated tolerance across a session.
-  let lastFailedCallSignature: string | undefined;
-  let repeatedFailureCount = 0;
-  let repeatedFailureNudgeStreak = 0;
-  // Same tracking, mirrored for a call that keeps succeeding with the exact
-  // same signature - the model-agnostic, tool-agnostic version of "you're
-  // repeating yourself" that a duplicate-round projection collapse can hide
-  // from the model (each request looks the same as the last, so nothing in
-  // its own view of the world signals it should stop).
-  let lastSuccessfulCallSignature: string | undefined;
-  let repeatedSuccessCount = 0;
-  let repeatedSuccessNudgeStreak = 0;
-  // Set when a repeated-success escalation is what pushed activity past the
-  // forcing threshold, so the forced call's resolution handler knows this
-  // wasn't ordinary accumulated work - "resume exactly what you were doing"
-  // would be actively wrong here, since what it was doing is the repeated
-  // call itself. Cleared the moment a forced call resolves, whatever caused
-  // it, so a later unrelated force never inherits a stale reason.
-  let forcedDueToRepeatedSuccess = false;
-  // Tracked independently of the tool_execution_end-based counters above -
-  // this fires at the tool_call stage, before the call has even run, so it
+  // This fires at the tool_call stage, before the call has even run, so it
   // has no notion of success/failure yet and doesn't need one: the same
-  // exact signature arriving a third consecutive time is blocked outright,
-  // regardless of whether it succeeded or failed the first two times.
+  // exact signature arriving a second consecutive time is blocked outright,
+  // whether it succeeded or failed the first time.
   let lastAttemptedCallSignature: string | undefined;
   let consecutiveAttemptCount = 0;
   // How many times we've escalated the hard-block refusal for the *current*
@@ -332,14 +351,9 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     cardActivitySinceUpdate = 0;
     cardNudgeStreak = 0;
     forceNudgeStreak = 0;
+    progressStreak = 0;
+    progressStreakNudgeStreak = 0;
     awaitingForcedSubstance = false;
-    lastFailedCallSignature = undefined;
-    repeatedFailureCount = 0;
-    repeatedFailureNudgeStreak = 0;
-    lastSuccessfulCallSignature = undefined;
-    repeatedSuccessCount = 0;
-    repeatedSuccessNudgeStreak = 0;
-    forcedDueToRepeatedSuccess = false;
     lastAttemptedCallSignature = undefined;
     consecutiveAttemptCount = 0;
     hardBlockReflectionStreak = 0;
@@ -348,7 +362,6 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     containedReflectionStreaks.clear();
     bashPatternCounts.clear();
     bashPatternReflectionStreaks.clear();
-    successfulCallCache.clear();
   };
 
   pi.registerFlag("context-card-recent-turns", {
@@ -397,16 +410,10 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     cardActivitySinceUpdate = 0;
     cardNudgeStreak = 0;
     forceNudgeStreak = 0;
+    progressStreak = 0;
+    progressStreakNudgeStreak = 0;
     awaitingForcedSubstance = false;
-    pendingCallSignatures.clear();
     pendingReadRanges.clear();
-    lastFailedCallSignature = undefined;
-    repeatedFailureCount = 0;
-    repeatedFailureNudgeStreak = 0;
-    lastSuccessfulCallSignature = undefined;
-    repeatedSuccessCount = 0;
-    repeatedSuccessNudgeStreak = 0;
-    forcedDueToRepeatedSuccess = false;
     lastAttemptedCallSignature = undefined;
     consecutiveAttemptCount = 0;
     hardBlockReflectionStreak = 0;
@@ -622,6 +629,13 @@ export default function agentContextCard(pi: ExtensionAPI): void {
 
     planningTurn = isPlanningRequest(event.text);
     turnMutated = false;
+    // Turn boundary: whatever exploration streak built up in a turn that's
+    // now concluding no longer indicates a stuck-in-a-loop turn - the model
+    // reached a natural stopping point and produced a reply, so the next
+    // turn starts the pace signal fresh, mirroring turnMutated's reset here.
+    progressStreak = 0;
+    progressStreakNudgeStreak = 0;
+    hasSentProviderRequestThisTurn = false;
     if (planCandidate && !planningTurn) {
       plan = promotePlan(planCandidate, plan);
       planCandidate = undefined;
@@ -682,39 +696,45 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     lastAttemptedCallSignature = signature;
     if (!isRepeatAttempt) hardBlockReflectionStreak = 0;
 
-    // Intercept repeated calls: if we have a cached successful result for this
-    // exact signature, return it immediately instead of blocking or executing
-    // - but only below the hard-block threshold. Traced evidence from a live
-    // run: once a signature had succeeded once, every future identical
-    // repeat was being served from cache unconditionally, with no cap at
-    // all - the model got a normal-looking success every time, never an
-    // error or refusal, so it had no signal anything was wrong and looped
-    // the same bash command 446 times across a full 20-minute turn timeout.
-    // Below the threshold, caching still avoids a real re-execution for a
-    // handful of legitimate quick repeats; at or past it, this must fall
-    // through to the same block-and-reflect path as any other stuck exact
-    // repeat, not bypass it entirely.
-    if (consecutiveAttemptCount < HARD_BLOCK_REPEAT_THRESHOLD) {
-      const cachedResult = successfulCallCache.get(signature);
-      if (cachedResult !== undefined) {
-        taskAudit(
-          "cache",
-          "hit",
-          `returning cached result for repeated call: ${signature}`,
-        );
-        return {
-          result: cachedResult,
-        };
-      }
-    }
-
     const read = readRange(event.toolName, event.input);
     if (read) {
+      // Whether this path's read is stale is not this adapter's call to
+      // make - src/core/projection.ts's hotEvidence already computes it
+      // correctly, mutation-gated with the same grace boundary the rest of
+      // the retirement system uses, over the actual conversation instead of
+      // this adapter's own local bookkeeping. A lease that's absent or
+      // "consumed" means a mutation of this path has landed since; treat
+      // locally-recorded coverage as void rather than maintaining a second,
+      // independent notion of staleness that has to be kept in sync by
+      // hand (see the comment on nextCount below for what happened the one
+      // time this adapter tried to track mutation-staleness itself).
+      const lease = (lastAudit?.hotEvidence ?? []).find(
+        (candidate) => candidate.path === read.path,
+      );
+      const staleFromMutation = !lease || lease.state === "consumed";
+      if (staleFromMutation) {
+        readCoverage.delete(read.path);
+        containedRepeatCounts.delete(read.path);
+        containedReflectionStreaks.delete(read.path);
+      }
       const covered = readCoverage.get(read.path) ?? [];
       if (covered.length > 0 && isFullyCovered(covered, read.range)) {
         const nextCount = (containedRepeatCounts.get(read.path) ?? 0) + 1;
         containedRepeatCounts.set(read.path, nextCount);
-        if (nextCount >= HARD_BLOCK_REPEAT_THRESHOLD) {
+        // This counter only increments once a read is already fully
+        // covered, so - unlike consecutiveAttemptCount and bashPatternCounts,
+        // which both count the establishing occurrence itself as 1 - its
+        // first increment already corresponds to the *second* time this
+        // content has been requested. Comparing it to
+        // HARD_BLOCK_REPEAT_THRESHOLD directly, as the other two do, silently
+        // grants one extra free real re-execution here that they don't grant
+        // elsewhere. Traced live in a real mycoder SWE-bench run
+        // (sympy__sympy-15345, 2026-09-27): the model read
+        // sympy/printing/mathematica.py in full three times before this
+        // finally blocked - the first two both executed for real and
+        // returned the actual file content again, which is exactly what
+        // tightening this threshold to 2 was supposed to prevent.
+        if (nextCount >= HARD_BLOCK_REPEAT_THRESHOLD - 1) {
           taskAudit(
             "forcing",
             "info",
@@ -761,14 +781,14 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         if (streak < HARD_BLOCK_REFLECTION_STREAK_CAP) {
           bashPatternReflectionStreaks.set(patternKey, streak + 1);
           pi.sendUserMessage(
-            `You've now run a search with the same pattern (${patternKey}) several times in a row, only varying the surrounding arguments (e.g. which files it's scoped to) - that's not a new search, it's the same one repeated. Stop and answer this first, in plain text: what did the earlier run(s) of this search already tell you, and what specifically are you still trying to find that a broader or narrower search of the same pattern would answer? Once you've answered that, either act on what you already found, or search for something genuinely different.`,
+            `You've now run a search with the same pattern (${patternKey}) again, only varying the surrounding arguments (e.g. which files it's scoped to) - that's not a new search, it's the same one repeated. Stop and answer this first, in plain text: what did the earlier run of this search already tell you, and what specifically are you still trying to find that a broader or narrower search of the same pattern would answer? Once you've answered that, either act on what you already found, or search for something genuinely different.`,
             { deliverAs: "steer" },
           );
         }
         return {
           block: true,
           reason:
-            "This search pattern has been run several times in a row with only the surrounding arguments (e.g. target files) varying - it is refused as a near-duplicate rather than executed again. Use the results you already have instead of re-running the same search.",
+            "This search pattern has already been run once, with only the surrounding arguments (e.g. target files) varying - it is refused as a near-duplicate rather than executed again. Use the results you already have instead of re-running the same search.",
         };
       }
     }
@@ -793,18 +813,12 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     };
   });
   pi.on("tool_execution_start", (event) => {
-    pendingCallSignatures.set(
-      event.toolCallId,
-      `${event.toolName}:${JSON.stringify(event.args)}`,
-    );
     pendingReadRanges.set(
       event.toolCallId,
       readRange(event.toolName, event.args ?? {}),
     );
   });
   pi.on("tool_execution_end", (event) => {
-    const signature = pendingCallSignatures.get(event.toolCallId);
-    pendingCallSignatures.delete(event.toolCallId);
     const pendingRead = pendingReadRanges.get(event.toolCallId);
     pendingReadRanges.delete(event.toolCallId);
     if (pendingRead && !event.isError) {
@@ -824,83 +838,47 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         mergeInterval(priorCoverage, pendingRead.range),
       );
     }
-    if (signature !== undefined && event.isError) {
-      // A failure breaks any in-progress identical-success streak just as
-      // surely as a differently-signatured success would - the next success,
-      // even with the same signature as before the failure, is a fresh
-      // recovery, not a continuation of the earlier streak.
-      lastSuccessfulCallSignature = undefined;
-      repeatedSuccessCount = 0;
-      repeatedSuccessNudgeStreak = 0;
-      repeatedFailureCount =
-        signature === lastFailedCallSignature ? repeatedFailureCount + 1 : 1;
-      lastFailedCallSignature = signature;
-      if (repeatedFailureCount === 1) repeatedFailureNudgeStreak = 0;
+    const name = event.toolName.toLocaleLowerCase();
+    const isCardToolCall = [
+      "update_card",
+      "card",
+      "card_new",
+      "card_reset",
+    ].includes(name);
+    // Tool-agnostic progress streak (see PROGRESS_STREAK_NUDGE_THRESHOLD):
+    // classified purely by tool name, independent of event.isError below
+    // except that only a *successful* mutation counts as real progress - a
+    // failed edit/write attempt is not a mutation that happened, so it falls
+    // through to the "neither" branch and still counts toward the streak,
+    // same as a failed exploratory call would.
+    if (!event.isError && isMutationToolName(event.toolName)) {
+      turnMutated = true;
+      progressStreak = 0;
+      progressStreakNudgeStreak = 0;
+    } else if (isCardToolCall) {
+      progressStreak = 0;
+      progressStreakNudgeStreak = 0;
+    } else {
+      progressStreak++;
       if (
-        repeatedFailureCount >= REPEATED_FAILURE_NUDGE_THRESHOLD &&
-        repeatedFailureNudgeStreak < CARD_NUDGE_STREAK_CAP
+        progressStreak >= PROGRESS_STREAK_NUDGE_THRESHOLD &&
+        anchor.goal &&
+        progressStreakNudgeStreak < PROGRESS_STREAK_NUDGE_STREAK_CAP
       ) {
-        pi.sendMessage(
-          {
-            customType: CARD_NUDGE_MESSAGE_TYPE,
-            content:
-              "That exact tool call just failed the same way it did immediately before - repeating it again won't produce a different result. Check the assumption behind it (file path, command syntax, argument) and try something different rather than retrying verbatim.",
-            display: false,
-          },
+        taskAudit(
+          "forcing",
+          "info",
+          `progress self-assessment nudge fired; streak=${progressStreak}`,
+        );
+        pi.sendUserMessage(
+          `You've made ${progressStreak} tool calls in a row without any file change or recorded finding (no edit/write/apply_patch, and no update_card call, since). Stop and answer this first, in plain text: are you making real progress toward the goal, or repeating exploration in a different form each time? State plainly what you're still trying to find and why continuing this way will get you there, or change approach.`,
           { deliverAs: "steer" },
         );
-        repeatedFailureNudgeStreak++;
-      }
-    } else if (signature !== undefined) {
-      // Cache the successful result for future repeats of this exact signature.
-      successfulCallCache.set(signature, event.result);
-
-      lastFailedCallSignature = undefined;
-      repeatedFailureCount = 0;
-      repeatedFailureNudgeStreak = 0;
-      repeatedSuccessCount =
-        signature === lastSuccessfulCallSignature
-          ? repeatedSuccessCount + 1
-          : 1;
-      lastSuccessfulCallSignature = signature;
-      if (repeatedSuccessCount === 1) repeatedSuccessNudgeStreak = 0;
-      if (
-        repeatedSuccessCount >= REPEATED_SUCCESS_NUDGE_THRESHOLD &&
-        repeatedSuccessNudgeStreak < CARD_NUDGE_STREAK_CAP
-      ) {
-        pi.sendMessage(
-          {
-            customType: CARD_NUDGE_MESSAGE_TYPE,
-            content:
-              "That exact call just succeeded with the same result as the call immediately before it - running it again won't tell you anything new. That repetition is now recorded in 'what happened' above; if it satisfies something on your pending list, call update_card to drop or complete that item instead of checking again.",
-            display: false,
-          },
-          { deliverAs: "steer" },
-        );
-        repeatedSuccessNudgeStreak++;
-        // Escalate straight past the generic activity threshold, the same
-        // way a costly read does below - a soft steer alone may not land
-        // once a model is already producing tool-call-only responses with
-        // no reasoning text to redirect, so give the before_provider_request
-        // forcing mechanism a chance to engage on the very next request too.
-        cardActivitySinceUpdate = Math.max(
-          cardActivitySinceUpdate,
-          CARD_ACTIVITY_NUDGE_THRESHOLD + 1,
-        );
-        forcedDueToRepeatedSuccess = true;
+        progressStreakNudgeStreak++;
       }
     }
-    if (!event.isError && isMutationToolName(event.toolName))
-      turnMutated = true;
     if (event.isError) return;
-    const name = event.toolName.toLocaleLowerCase();
-    if (
-      name === "update_card" ||
-      name === "card" ||
-      name === "card_new" ||
-      name === "card_reset"
-    )
-      return;
+    if (isCardToolCall) return;
     if (name === "bash") {
       const args =
         event.result && typeof event.result === "object"
@@ -1260,6 +1238,39 @@ export default function agentContextCard(pi: ExtensionAPI): void {
           params.pending.some((item) => item.trim())) ||
         (Array.isArray(params.findings) &&
           params.findings.some((finding) => finding.detail?.trim()));
+      // Whether this call cited any read currently held hot in context
+      // (lastAudit.hotEvidence, refreshed by the "context" handler on the
+      // immediately preceding provider request). Citing a path in
+      // findings[].sources is the only mechanism (consumedByFinding,
+      // src/core/projection.ts) that can retire a read before any mutation
+      // has landed - consumedByDisuse is deliberately gated off until then
+      // (see the comment on consumedByDisuse: a controlled 155-read
+      // evaluation found disuse's accuracy collapses to 8-38% in
+      // pure-investigation sessions with zero edits, so it refuses to guess
+      // there). During an exploration-only turn, an uncited active read
+      // simply never retires no matter how many rounds pass. A forced call
+      // that reports findings/pending but cites nothing has produced text
+      // without resolving the thing forcing exists to fix - context still
+      // holds every active read it held before.
+      const activeEvidencePaths = (lastAudit?.hotEvidence ?? [])
+        .filter((lease) => lease.state === "active")
+        .map((lease) => lease.path);
+      const citedSourcePaths = new Set(
+        Array.isArray(params.findings)
+          ? params.findings.flatMap((finding) =>
+              Array.isArray(finding.sources)
+                ? finding.sources.filter(
+                    (source) => typeof source === "string" && source.trim(),
+                  )
+                : [],
+            )
+          : [],
+      );
+      const citesActiveEvidence = activeEvidencePaths.some((path) =>
+        citedSourcePaths.has(path),
+      );
+      const citationThin =
+        activeEvidencePaths.length > 0 && !citesActiveEvidence;
       const wasForced = awaitingForcedSubstance;
       awaitingForcedSubstance = false;
 
@@ -1273,27 +1284,38 @@ export default function agentContextCard(pi: ExtensionAPI): void {
           "skipped",
           `forced update_card returned no findings/pending; streak=${forceNudgeStreak}`,
         );
+      } else if (wasForced && citationThin) {
+        // Substance was produced, but it left every currently-hot read
+        // uncited - same non-resolution treatment as the no-findings case
+        // above, for the reason in the comment on citationThin.
+        taskAudit(
+          "forcing",
+          "skipped",
+          `forced update_card cited no active evidence (${activeEvidencePaths.length} path(s) hot); streak=${forceNudgeStreak}`,
+        );
       } else {
         cardActivitySinceUpdate = 0;
         cardNudgeStreak = 0;
         forceNudgeStreak = 0;
       }
       if (wasForced) {
-        const dueToRepetition = forcedDueToRepeatedSuccess;
-        forcedDueToRepeatedSuccess = false;
-        if (dueToRepetition) {
-          // This force fired because a call kept succeeding with an
-          // unchanged result, not because of ordinary accumulated work - the
-          // generic "resume exactly what you were doing before it" message
-          // below would tell the model to resume the very repetition this
-          // was meant to interrupt. Point it at something different instead:
-          // reconcile pending against what's already been confirmed, or do
-          // something that isn't the call that just triggered this.
+        if (citationThin) {
+          // Distinct from the generic "resume" message below: this
+          // specifically names the uncited active paths, since telling the
+          // model to "resume what you were doing" doesn't address why it
+          // was forced (context held onto uncited reads) and gives it
+          // nothing concrete to act on. Capped to keep the nudge itself
+          // small - the whole point is reducing what's held in context, not
+          // adding a long path list to it every time this fires.
+          const listedPaths = activeEvidencePaths.slice(0, 8);
+          const pathsSuffix =
+            activeEvidencePaths.length > listedPaths.length
+              ? `, +${activeEvidencePaths.length - listedPaths.length} more`
+              : "";
           pi.sendMessage(
             {
               customType: CARD_NUDGE_MESSAGE_TYPE,
-              content:
-                "That update_card call was compelled because the same call kept succeeding with the same result - do not repeat that call again. Check it against your pending list: if it already satisfies a pending item, drop or complete that item. Otherwise take a genuinely different action toward the goal.",
+              content: `That update_card call didn't cite any of the ${activeEvidencePaths.length} file(s) currently held as active evidence: ${listedPaths.join(", ")}${pathsSuffix}. If a finding is based on one of them, list it in that finding's sources so the raw read can retire. If a file turned out irrelevant, say so explicitly instead of leaving it uncited.`,
               display: false,
             },
             { deliverAs: "steer" },
@@ -1327,6 +1349,12 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   });
 
   pi.on("before_provider_request", (event, _ctx) => {
+    // Captured before the early-return checks below so it reflects actual
+    // request cadence for this turn regardless of payload shape - a request
+    // with an unusable payload or no update_card tool still counts as the
+    // model's chance to reply.
+    const isFirstProviderRequestThisTurn = !hasSentProviderRequestThisTurn;
+    hasSentProviderRequestThisTurn = true;
     const payload = event.payload;
     if (
       payload === undefined ||
@@ -1359,6 +1387,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       return undefined;
     }
     if (
+      !isFirstProviderRequestThisTurn &&
       cardActivitySinceUpdate > CARD_ACTIVITY_NUDGE_THRESHOLD &&
       forceNudgeStreak < CARD_NUDGE_STREAK_CAP
     ) {

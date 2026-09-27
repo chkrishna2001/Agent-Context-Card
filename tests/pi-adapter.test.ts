@@ -180,6 +180,53 @@ function harness(
   };
 }
 
+// A read round + its result, for seeding lastAudit.hotEvidence via
+// extension.project() ahead of a tool_call-gate test - the gate's
+// mutation-awareness (src/pi/index.ts) now reads live hotEvidence instead
+// of tracking staleness itself, so tests that exercise it need a real
+// projected lease, not just a sequence of extension.call()s.
+function readSeed(id: string, path: string, text = "seed"): AgentMessage[] {
+  return [
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id, name: "read", arguments: { path } }],
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+    } as unknown as AgentMessage,
+    {
+      role: "toolResult",
+      toolCallId: id,
+      toolName: "read",
+      isError: false,
+      content: [{ type: "text", text }],
+      timestamp: Date.now(),
+    } as unknown as AgentMessage,
+  ];
+}
+
+// Same shape for a successful mutation of that path, appended after a
+// readSeed so hotEvidence marks that lease "consumed".
+function editSeed(id: string, path: string): AgentMessage[] {
+  return [
+    {
+      role: "assistant",
+      content: [
+        { type: "toolCall", id, name: "edit", arguments: { path, edits: [] } },
+      ],
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+    } as unknown as AgentMessage,
+    {
+      role: "toolResult",
+      toolCallId: id,
+      toolName: "edit",
+      isError: false,
+      content: [{ type: "text", text: "ok" }],
+      timestamp: Date.now(),
+    } as unknown as AgentMessage,
+  ];
+}
+
 describe("Pi adapter", () => {
   test("registers no model-facing tools beyond update_card and keeps audit outside context", async () => {
     const extension = harness();
@@ -650,6 +697,11 @@ describe("Pi adapter", () => {
         { type: "function", function: { name: "read" } },
       ],
     };
+    // The turn's first provider request must never be forced - it's the
+    // model's only chance at a free-text reply this turn. Only once it has
+    // already responded (a second request going out) can forcing engage.
+    const firstRequest = await extension.beforeProviderRequest(payload);
+    expect(firstRequest).toBeUndefined();
     const result = await extension.beforeProviderRequest(payload);
     expect(result).toBeDefined();
     expect((result as any).tool_choice).toEqual({
@@ -684,6 +736,10 @@ describe("Pi adapter", () => {
       messages: [{ role: "user", content: "test" }],
       tools: [{ type: "function", function: { name: "update_card" } }],
     };
+    // The turn's very first request never forces, regardless of activity -
+    // burn it here so the cap assertions below exercise requests 2/3/4.
+    const priming = await extension.beforeProviderRequest(payload);
+    expect(priming).toBeUndefined();
     const first = await extension.beforeProviderRequest(payload);
     const second = await extension.beforeProviderRequest(payload);
     const third = await extension.beforeProviderRequest(payload);
@@ -692,7 +748,7 @@ describe("Pi adapter", () => {
     expect(third).toBeUndefined();
   });
 
-  test("a single costly read forces update_card without waiting for the activity threshold", async () => {
+  test("a costly read on the turn's first request does not force update_card until the model has replied", async () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
@@ -708,6 +764,13 @@ describe("Pi adapter", () => {
       messages: [{ role: "user", content: "test" }],
       tools: [{ type: "function", function: { name: "update_card" } }],
     };
+    // Request 1 of the turn: activity is already over threshold from the
+    // costly read, but this is the model's first chance to reply this turn
+    // - forcing here would suppress that reply, so it must not force yet.
+    const firstRequest = await extension.beforeProviderRequest(payload);
+    expect(firstRequest).toBeUndefined();
+    // Request 2: the model has now already had (and used) its first-reply
+    // opportunity, so the same elevated activity may force update_card.
     const result = await extension.beforeProviderRequest(payload);
     expect(result).toBeDefined();
     expect((result as any).tool_choice).toEqual({
@@ -746,6 +809,8 @@ describe("Pi adapter", () => {
       messages: [{ role: "user", content: "test" }],
       tools: [{ type: "function", function: { name: "update_card" } }],
     };
+    // Burn the turn's unforceable first request before asserting forcing.
+    expect(await extension.beforeProviderRequest(payload)).toBeUndefined();
     const forced = await extension.beforeProviderRequest(payload);
     expect(forced).toBeDefined();
 
@@ -774,6 +839,8 @@ describe("Pi adapter", () => {
       messages: [{ role: "user", content: "test" }],
       tools: [{ type: "function", function: { name: "update_card" } }],
     };
+    // Burn the turn's unforceable first request before asserting forcing.
+    expect(await extension.beforeProviderRequest(payload)).toBeUndefined();
     const forced = await extension.beforeProviderRequest(payload);
     expect(forced).toBeDefined();
 
@@ -783,6 +850,147 @@ describe("Pi adapter", () => {
     await tool.execute(
       "call-1",
       { findings: [{ topic: "schema", detail: "no caps allowed" }] },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    // Activity reset to 0, so a single further read stays well below the
+    // threshold and forcing should not engage again yet.
+    await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    const notForcedYet = await extension.beforeProviderRequest(payload);
+    expect(notForcedYet).toBeUndefined();
+  });
+
+  test("a forced update_card call that cites no active evidence does not reset the activity streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Investigate feature X");
+    const readId = "read-1";
+    // Establishes lastAudit.hotEvidence: one active read of src/a.ts, no
+    // mutation, so consumedByDisuse can't have retired it either.
+    await extension.project([
+      { role: "user", content: "Investigate feature X", timestamp: 1 },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: readId,
+            name: "read",
+            arguments: { path: "src/a.ts" },
+          },
+        ],
+        stopReason: "toolUse",
+        timestamp: 2,
+      },
+      {
+        role: "toolResult",
+        toolCallId: readId,
+        toolName: "read",
+        isError: false,
+        content: [{ type: "text", text: "file contents" }],
+        timestamp: 3,
+      },
+    ] as unknown as AgentMessage[]);
+    for (let index = 0; index < 11; index += 1) {
+      await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    }
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    // Burn the turn's unforceable first request before asserting forcing.
+    expect(await extension.beforeProviderRequest(payload)).toBeUndefined();
+    const forced = await extension.beforeProviderRequest(payload);
+    expect(forced).toBeDefined();
+
+    const tool = extension.tools.find((t) => t.name === "update_card");
+    expect(tool).toBeDefined();
+    if (!tool) throw new Error("update_card tool missing");
+    // Substantive finding, but it cites nothing - src/a.ts is the only path
+    // currently held as active evidence and this response ignores it.
+    await tool.execute(
+      "call-1",
+      {
+        findings: [
+          { topic: "feature X", detail: "looked promising but unrelated" },
+        ],
+      },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    const steerCalls = extension.sentMessages.filter(
+      (entry) => entry.message.customType === CARD_NUDGE_MESSAGE_TYPE,
+    );
+    expect(steerCalls.at(-1)?.message.content).toContain("src/a.ts");
+
+    // Activity never reset, so a single further read keeps it above the
+    // threshold and forcing should engage again immediately.
+    await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    const forcedAgain = await extension.beforeProviderRequest(payload);
+    expect(forcedAgain).toBeDefined();
+  });
+
+  test("a forced update_card call that cites active evidence resets the activity streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Investigate feature X");
+    const readId = "read-1";
+    await extension.project([
+      { role: "user", content: "Investigate feature X", timestamp: 1 },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: readId,
+            name: "read",
+            arguments: { path: "src/a.ts" },
+          },
+        ],
+        stopReason: "toolUse",
+        timestamp: 2,
+      },
+      {
+        role: "toolResult",
+        toolCallId: readId,
+        toolName: "read",
+        isError: false,
+        content: [{ type: "text", text: "file contents" }],
+        timestamp: 3,
+      },
+    ] as unknown as AgentMessage[]);
+    for (let index = 0; index < 11; index += 1) {
+      await extension.toolExecutionEnd({ toolName: "read", isError: false });
+    }
+    const payload = {
+      model: "test-model",
+      messages: [{ role: "user", content: "test" }],
+      tools: [{ type: "function", function: { name: "update_card" } }],
+    };
+    expect(await extension.beforeProviderRequest(payload)).toBeUndefined();
+    const forced = await extension.beforeProviderRequest(payload);
+    expect(forced).toBeDefined();
+
+    const tool = extension.tools.find((t) => t.name === "update_card");
+    expect(tool).toBeDefined();
+    if (!tool) throw new Error("update_card tool missing");
+    // Cites the exact path held as active evidence this time.
+    await tool.execute(
+      "call-1",
+      {
+        findings: [
+          {
+            topic: "feature X",
+            detail: "lives in src/a.ts",
+            sources: ["src/a.ts"],
+          },
+        ],
+      },
       undefined,
       undefined,
       {} as any,
@@ -835,92 +1043,12 @@ describe("Pi adapter", () => {
     );
   });
 
-  test("the exact same call failing twice in a row triggers a repeated-call steer nudge", async () => {
-    const extension = harness();
-    await extension.start();
-    await extension.input("Implement feature X");
-    await extension.call(
-      "call-1",
-      "read",
-      { path: "sympy/solveset.py" },
-      { isError: true },
-    );
-    let nudges = extension.sentMessages.filter(
-      (entry) =>
-        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
-        entry.options?.deliverAs === "steer",
-    );
-    expect(nudges.length).toBe(0);
-
-    await extension.call(
-      "call-2",
-      "read",
-      { path: "sympy/solveset.py" },
-      { isError: true },
-    );
-    nudges = extension.sentMessages.filter(
-      (entry) =>
-        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
-        entry.options?.deliverAs === "steer",
-    );
-    expect(nudges.length).toBe(1);
-  });
-
-  test("a different failing call does not count toward the repeated-call streak", async () => {
-    const extension = harness();
-    await extension.start();
-    await extension.input("Implement feature X");
-    await extension.call(
-      "call-1",
-      "read",
-      { path: "sympy/solveset.py" },
-      { isError: true },
-    );
-    await extension.call(
-      "call-2",
-      "read",
-      { path: "sympy/other.py" },
-      { isError: true },
-    );
-    const nudges = extension.sentMessages.filter(
-      (entry) =>
-        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
-        entry.options?.deliverAs === "steer",
-    );
-    expect(nudges.length).toBe(0);
-  });
-
-  test("a successful call in between resets the repeated-failure streak", async () => {
-    const extension = harness();
-    await extension.start();
-    await extension.input("Implement feature X");
-    await extension.call(
-      "call-1",
-      "read",
-      { path: "sympy/solveset.py" },
-      { isError: true },
-    );
-    await extension.call("call-2", "bash", { command: "ls" }, {});
-    await extension.call(
-      "call-3",
-      "read",
-      { path: "sympy/solveset.py" },
-      { isError: true },
-    );
-    const nudges = extension.sentMessages.filter(
-      (entry) =>
-        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
-        entry.options?.deliverAs === "steer",
-    );
-    expect(nudges.length).toBe(0);
-  });
-
-  test("a third identical failing attempt is hard-blocked before the soft nudge cap is ever reached", async () => {
+  test("the second identical failing attempt is hard-blocked outright, no execution", async () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
     const results: Array<{ block?: boolean; reason?: string } | undefined> = [];
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       results.push(
         await extension.call(
           `call-${index}`,
@@ -930,13 +1058,13 @@ describe("Pi adapter", () => {
         ),
       );
     }
-    // Attempts 1-2 execute for real (triggering exactly one soft nudge on
-    // attempt 2); attempt 3 onward is blocked outright at the tool_call
-    // stage before it ever executes, so the old two-nudge cap is moot - the
-    // hard block supersedes it well before a second nudge's execution could
-    // happen.
-    expect(results.slice(0, 2)).toEqual([undefined, undefined]);
-    for (const result of results.slice(2)) {
+    // Attempt 1 executes for real (and fails); attempt 2 onward is blocked
+    // outright at the tool_call stage before it ever executes - there is no
+    // grace repeat and no soft nudge in between, since a call that never
+    // executes a second time can never be observed failing (or succeeding)
+    // a second time by anything downstream.
+    expect(results[0]).toBeUndefined();
+    for (const result of results.slice(1)) {
       expect(result?.block).toBe(true);
       expect(typeof result?.reason).toBe("string");
       expect(result?.reason?.length).toBeGreaterThan(0);
@@ -946,10 +1074,11 @@ describe("Pi adapter", () => {
         entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
         entry.options?.deliverAs === "steer",
     );
-    expect(nudges.length).toBe(1);
-    // 3 blocked attempts (call-2 through call-4), but the reflection escalation
-    // is capped at HARD_BLOCK_REFLECTION_STREAK_CAP (2) so an unattended
-    // session doesn't manufacture user turns forever if even this doesn't land.
+    expect(nudges.length).toBe(0);
+    // 3 blocked attempts (call-1 through call-3), but the reflection
+    // escalation is capped at HARD_BLOCK_REFLECTION_STREAK_CAP (2) so an
+    // unattended session doesn't manufacture user turns forever if even
+    // this doesn't land.
     expect(extension.sentUserMessages.length).toBe(2);
     for (const entry of extension.sentUserMessages) {
       expect(entry.options?.deliverAs).toBe("steer");
@@ -957,92 +1086,12 @@ describe("Pi adapter", () => {
     }
   });
 
-  test("the exact same call succeeding twice in a row triggers a repeated-success steer nudge", async () => {
-    const extension = harness();
-    await extension.start();
-    await extension.input("Implement feature X");
-    await extension.call(
-      "call-1",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    let nudges = extension.sentMessages.filter(
-      (entry) =>
-        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
-        entry.options?.deliverAs === "steer",
-    );
-    expect(nudges.length).toBe(0);
-
-    await extension.call(
-      "call-2",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    nudges = extension.sentMessages.filter(
-      (entry) =>
-        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
-        entry.options?.deliverAs === "steer",
-    );
-    expect(nudges.length).toBe(1);
-  });
-
-  test("a different successful call does not count toward the repeated-success streak", async () => {
-    const extension = harness();
-    await extension.start();
-    await extension.input("Implement feature X");
-    await extension.call(
-      "call-1",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    await extension.call("call-2", "bash", { command: "ls" }, {});
-    const nudges = extension.sentMessages.filter(
-      (entry) =>
-        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
-        entry.options?.deliverAs === "steer",
-    );
-    expect(nudges.length).toBe(0);
-  });
-
-  test("a failing call in between resets the repeated-success streak", async () => {
-    const extension = harness();
-    await extension.start();
-    await extension.input("Implement feature X");
-    await extension.call(
-      "call-1",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    await extension.call(
-      "call-2",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      { isError: true },
-    );
-    await extension.call(
-      "call-3",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    const nudges = extension.sentMessages.filter(
-      (entry) =>
-        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
-        entry.options?.deliverAs === "steer",
-    );
-    expect(nudges.length).toBe(0);
-  });
-
-  test("a third identical successful attempt is hard-blocked before the soft nudge cap is ever reached", async () => {
+  test("the second identical successful attempt is hard-blocked outright, no execution", async () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
     const results: Array<{ block?: boolean; reason?: string } | undefined> = [];
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       results.push(
         await extension.call(
           `call-${index}`,
@@ -1052,8 +1101,8 @@ describe("Pi adapter", () => {
         ),
       );
     }
-    expect(results.slice(0, 2)).toEqual([undefined, undefined]);
-    for (const result of results.slice(2)) {
+    expect(results[0]).toBeUndefined();
+    for (const result of results.slice(1)) {
       expect(result?.block).toBe(true);
       expect(typeof result?.reason).toBe("string");
       expect(result?.reason?.length).toBeGreaterThan(0);
@@ -1063,7 +1112,7 @@ describe("Pi adapter", () => {
         entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
         entry.options?.deliverAs === "steer",
     );
-    expect(nudges.length).toBe(1);
+    expect(nudges.length).toBe(0);
   });
 
   test("a different call in between resets the hard-block counter", async () => {
@@ -1097,7 +1146,7 @@ describe("Pi adapter", () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 2; index += 1) {
       await extension.call(
         `same-${index}`,
         "bash",
@@ -1107,7 +1156,7 @@ describe("Pi adapter", () => {
     }
     expect(extension.sentUserMessages.length).toBe(1);
     await extension.call("different", "bash", { command: "ls" }, {});
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 2; index += 1) {
       await extension.call(
         `same-again-${index}`,
         "bash",
@@ -1136,72 +1185,38 @@ describe("Pi adapter", () => {
     }
   });
 
-  test("the hard block counts a failure and a success of the same call toward one streak", async () => {
+  test("the hard block counts a prior failure of the same call toward the streak that blocks its next attempt", async () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
-    await extension.call(
+    const first = await extension.call(
       "call-1",
       "bash",
       { command: "python reproduce_issue.py" },
       { isError: true },
     );
-    await extension.call(
+    const second = await extension.call(
       "call-2",
       "bash",
       { command: "python reproduce_issue.py" },
       {},
     );
-    const third = await extension.call(
-      "call-3",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    expect(third?.block).toBe(true);
-  });
-
-  test("the success cache stops bypassing the hard block once the repeat threshold is reached", async () => {
-    const extension = harness();
-    await extension.start();
-    await extension.input("Implement feature X");
-    const args = { command: "python verify.py" };
-    const first = await extension.call("call-1", "bash", args, {
-      result: "PASS",
-    });
-    const second = await extension.call("call-2", "bash", args, {
-      result: "PASS",
-    });
-    const third = await extension.call("call-3", "bash", args, {
-      result: "PASS",
-    });
-    const fourth = await extension.call("call-4", "bash", args, {
-      result: "PASS",
-    });
     expect(first).toBeUndefined();
-    // Below the hard-block threshold: served from cache, not blocked, and
-    // not re-executed as a fresh call.
-    expect(second?.result).toBe("PASS");
-    expect(second?.block).toBeUndefined();
-    // At and past the threshold, caching must no longer bypass the block -
-    // this is the exact failure mode traced live: a signature that had
-    // succeeded once was cached forever after with no cap, so a model stuck
-    // repeating it got a normal-looking success every time and never
-    // stopped (446 repeats over a full 20-minute turn timeout in one run).
-    expect(third?.block).toBe(true);
-    expect(fourth?.block).toBe(true);
-    const cacheHits = extension.entries.filter(
-      (entry) =>
-        entry.customType === TASK_STATE_AUDIT_ENTRY_TYPE &&
-        (entry.data as { operation?: string }).operation === "cache",
-    );
-    expect(cacheHits.length).toBe(1);
+    // The second attempt is blocked outright regardless of whether it would
+    // have succeeded this time - the streak is tracked by signature alone,
+    // independent of outcome, at the tool_call stage before execution ever
+    // happens.
+    expect(second?.block).toBe(true);
   });
 
   test("overlapping reads of the same file under shifting offset/limit are recognized as redundant and hard-blocked", async () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
+    await extension.project([
+      { role: "user", content: "Implement feature X", timestamp: 1 },
+      ...readSeed("seed-1", "sympy/solvers/inequalities.py"),
+    ]);
     const first = await extension.call(
       "call-1",
       "read",
@@ -1214,26 +1229,12 @@ describe("Pi adapter", () => {
       { path: "sympy/solvers/inequalities.py", offset: 50, limit: 30 },
       {},
     );
-    const third = await extension.call(
-      "call-3",
-      "read",
-      { path: "sympy/solvers/inequalities.py", offset: 20, limit: 40 },
-      {},
-    );
-    const fourth = await extension.call(
-      "call-4",
-      "read",
-      { path: "sympy/solvers/inequalities.py", offset: 10, limit: 10 },
-      {},
-    );
-    // None of these four calls share identical arguments, so the plain
+    // Neither call shares identical arguments with the other, so the plain
     // exact-signature hard block never sees a repeat - only range
     // containment catches this.
     expect(first).toBeUndefined();
-    expect(second).toBeUndefined();
-    expect(third).toBeUndefined();
-    expect(fourth?.block).toBe(true);
-    expect(fourth?.reason).toContain(
+    expect(second?.block).toBe(true);
+    expect(second?.reason).toContain(
       "already been returned by an earlier read",
     );
     const reflections = extension.sentUserMessages.filter(
@@ -1243,6 +1244,81 @@ describe("Pi adapter", () => {
     expect(String(reflections[0]!.content)).toContain(
       "sympy/solvers/inequalities.py",
     );
+  });
+
+  test("a successful edit of the same path clears its contained-read streak, so a re-read after it is never blocked", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.project([
+      { role: "user", content: "Implement feature X", timestamp: 1 },
+      ...readSeed("seed-read", "sympy/printing/mathematica.py"),
+    ]);
+    const first = await extension.call(
+      "call-1",
+      "read",
+      { path: "sympy/printing/mathematica.py" },
+      {},
+    );
+    const editResult = await extension.call(
+      "call-2",
+      "edit",
+      { path: "sympy/printing/mathematica.py", edits: [] },
+      {},
+    );
+    // Reflects the edit that just landed - in production this happens
+    // automatically on the next provider request's "context" call; the
+    // test harness needs the same step made explicit.
+    await extension.project([
+      { role: "user", content: "Implement feature X", timestamp: 1 },
+      ...readSeed("seed-read", "sympy/printing/mathematica.py"),
+      ...editSeed("seed-edit", "sympy/printing/mathematica.py"),
+    ]);
+    // Same exact request as the first read - would have been the second
+    // "fully covered" occurrence and blocked outright if the edit in
+    // between hadn't invalidated the stale coverage it was recorded
+    // against.
+    const second = await extension.call(
+      "call-3",
+      "read",
+      { path: "sympy/printing/mathematica.py" },
+      {},
+    );
+    expect(first).toBeUndefined();
+    expect(editResult).toBeUndefined();
+    expect(second).toBeUndefined();
+  });
+
+  test("a failed edit attempt does not clear the contained-read streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature X");
+    await extension.project([
+      { role: "user", content: "Implement feature X", timestamp: 1 },
+      ...readSeed("seed-read", "sympy/printing/mathematica.py"),
+    ]);
+    await extension.call(
+      "call-1",
+      "read",
+      { path: "sympy/printing/mathematica.py" },
+      {},
+    );
+    await extension.call(
+      "call-2",
+      "edit",
+      { path: "sympy/printing/mathematica.py", edits: [] },
+      { isError: true },
+    );
+    // The edit never actually landed (and was never reflected in a project()
+    // call either), so hotEvidence still shows the read as active - this
+    // repeat should still be caught.
+    const second = await extension.call(
+      "call-3",
+      "read",
+      { path: "sympy/printing/mathematica.py" },
+      {},
+    );
+    expect(second?.block).toBe(true);
   });
 
   test("sequential non-overlapping reads of a large file are never blocked, however many chunks", async () => {
@@ -1271,6 +1347,11 @@ describe("Pi adapter", () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
+    await extension.project([
+      { role: "user", content: "Implement feature X", timestamp: 1 },
+      ...readSeed("seed-a", "sympy/solvers/inequalities.py"),
+      ...readSeed("seed-b", "sympy/core/relational.py"),
+    ]);
     await extension.call(
       "a-1",
       "read",
@@ -1345,21 +1426,12 @@ describe("Pi adapter", () => {
       },
       {},
     );
-    const third = await extension.call(
-      "call-3",
-      "bash",
-      {
-        command: 'grep -r "def as_set" sympy/sets/sets.py',
-      },
-      {},
-    );
-    // None of these three share identical arguments, so the exact-signature
-    // hard block never sees a repeat - only the search-pattern normalizer
-    // catches this.
+    // Neither call shares identical arguments with the other, so the
+    // exact-signature hard block never sees a repeat - only the
+    // search-pattern normalizer catches this.
     expect(first).toBeUndefined();
-    expect(second).toBeUndefined();
-    expect(third?.block).toBe(true);
-    expect(third?.reason).toContain("near-duplicate");
+    expect(second?.block).toBe(true);
+    expect(second?.reason).toContain("near-duplicate");
     const reflections = extension.sentUserMessages.filter(
       (entry) => entry.options?.deliverAs === "steer",
     );
@@ -1389,38 +1461,29 @@ describe("Pi adapter", () => {
     const extension = harness();
     await extension.start();
     await extension.input("Implement feature X");
-    await extension.call(
+    const first = await extension.call(
       "grep-1",
       "bash",
       { command: 'grep -r "def as_set" sympy/core/relational.py' },
       {},
     );
-    await extension.call(
+    const other = await extension.call(
       "other-1",
       "bash",
       { command: "python reproduce_issue.py" },
       {},
     );
-    const result = await extension.call(
+    const second = await extension.call(
       "grep-2",
       "bash",
       { command: 'grep -r "def as_set" sympy/core/expr.py' },
       {},
     );
-    await extension.call(
-      "other-2",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    const third = await extension.call(
-      "grep-3",
-      "bash",
-      { command: 'grep -r "def as_set" sympy/sets/sets.py' },
-      {},
-    );
-    expect(result).toBeUndefined();
-    expect(third?.block).toBe(true);
+    expect(first).toBeUndefined();
+    expect(other).toBeUndefined();
+    // The unrelated bash call in between didn't reset the search-pattern
+    // count - the second grep still lands on it as a near-duplicate.
+    expect(second?.block).toBe(true);
   });
 
   test("an exact byte-identical repeat of a search command is handled by the existing exact-signature block, not the near-duplicate one", async () => {
@@ -1435,80 +1498,6 @@ describe("Pi adapter", () => {
     expect(third?.reason).toContain("no new arguments");
   });
 
-  test("a repeated successful call escalates activity so before_provider_request can also force update_card", async () => {
-    const extension = harness();
-    await extension.start();
-    await extension.input("Implement feature X");
-    // Below the generic activity threshold on its own - only the two
-    // identical successes should be enough to escalate it, exactly as a
-    // costly read does, without needing 11 distinct calls.
-    await extension.call(
-      "call-1",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    await extension.call(
-      "call-2",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    const payload = {
-      model: "test-model",
-      messages: [{ role: "user", content: "test" }],
-      tools: [{ type: "function", function: { name: "update_card" } }],
-    };
-    const result = await extension.beforeProviderRequest(payload);
-    expect(result).toBeDefined();
-    expect((result as any).tool_choice).toEqual({
-      type: "function",
-      function: { name: "update_card" },
-    });
-  });
-
-  test("a force triggered by repeated success tells the model not to resume that call, unlike a generic force", async () => {
-    const extension = harness();
-    await extension.start();
-    await extension.input("Implement feature X");
-    await extension.call(
-      "call-1",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    await extension.call(
-      "call-2",
-      "bash",
-      { command: "python reproduce_issue.py" },
-      {},
-    );
-    const payload = {
-      model: "test-model",
-      messages: [{ role: "user", content: "test" }],
-      tools: [{ type: "function", function: { name: "update_card" } }],
-    };
-    const forced = await extension.beforeProviderRequest(payload);
-    expect(forced).toBeDefined();
-
-    const tool = extension.tools.find((t) => t.name === "update_card");
-    if (!tool) throw new Error("update_card tool missing");
-    await tool.execute("call-3", {}, undefined, undefined, {} as any);
-
-    const steerCalls = extension.sentMessages.filter(
-      (entry) =>
-        entry.message.customType === CARD_NUDGE_MESSAGE_TYPE &&
-        entry.options?.deliverAs === "steer",
-    );
-    const resolutionSteer = steerCalls.at(-1);
-    expect(resolutionSteer?.message.content).toContain(
-      "do not repeat that call again",
-    );
-    expect(resolutionSteer?.message.content).not.toContain(
-      "Resume exactly what you were doing before it",
-    );
-  });
-
   test("a forced update_card call steers the model back to acting, whether thin or substantive", async () => {
     const extension = harness();
     await extension.start();
@@ -1521,6 +1510,8 @@ describe("Pi adapter", () => {
       messages: [{ role: "user", content: "test" }],
       tools: [{ type: "function", function: { name: "update_card" } }],
     };
+    // Burn the turn's unforceable first request before asserting forcing.
+    expect(await extension.beforeProviderRequest(payload)).toBeUndefined();
     const forced = await extension.beforeProviderRequest(payload);
     expect(forced).toBeDefined();
 
@@ -1552,6 +1543,8 @@ describe("Pi adapter", () => {
       messages: [{ role: "user", content: "test" }],
       tools: [{ type: "function", function: { name: "update_card" } }],
     };
+    // Burn the turn's unforceable first request before asserting forcing.
+    expect(await extension.beforeProviderRequest(payload)).toBeUndefined();
     const forced = await extension.beforeProviderRequest(payload);
     expect(forced).toBeDefined();
 
@@ -1628,6 +1621,120 @@ describe("Pi adapter", () => {
         (entry.data as any)?.status === "skipped",
     );
     expect(auditSkips.length).toBeGreaterThan(0);
+  });
+
+  test("the progress self-assessment nudge fires after enough tool calls of varying, unrelated tool names, and never blocks the call", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature Z");
+    // Alternate between two different tools with unrelated, non-repeating
+    // arguments each time - proving this is a tool-agnostic pace signal, not
+    // duplicate-detection in disguise (no signature or pattern ever repeats
+    // here, so none of the exact-repeat/near-duplicate hard blocks engage).
+    for (let index = 0; index < 12; index += 1) {
+      const toolName = index % 2 === 0 ? "read" : "bash";
+      const args =
+        toolName === "read"
+          ? { path: `sympy/file-${index}.py` }
+          : { command: `echo distinct-marker-${index}` };
+      const result = await extension.call(`call-${index}`, toolName, args, {});
+      expect(result?.block).toBeUndefined();
+    }
+    expect(extension.sentUserMessages.length).toBe(1);
+    expect(extension.sentUserMessages[0]?.options).toEqual({
+      deliverAs: "steer",
+    });
+    expect(String(extension.sentUserMessages[0]?.content)).toContain(
+      "tool calls in a row",
+    );
+  });
+
+  test("a successful mutation resets the progress streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature Z");
+    for (let index = 0; index < 11; index += 1) {
+      await extension.call(
+        `call-${index}`,
+        "read",
+        { path: `sympy/file-${index}.py` },
+        {},
+      );
+    }
+    expect(extension.sentUserMessages.length).toBe(0);
+    await extension.call(
+      "edit-1",
+      "edit",
+      { path: "sympy/file.py", old: "a", new: "b" },
+      {},
+    );
+    // If the streak had not reset, this next read would be the 12th in a
+    // row and would fire the nudge immediately.
+    await extension.call(
+      "call-after-0",
+      "read",
+      { path: "sympy/other-0.py" },
+      {},
+    );
+    expect(extension.sentUserMessages.length).toBe(0);
+    for (let index = 1; index < 12; index += 1) {
+      await extension.call(
+        `call-after-${index}`,
+        "read",
+        { path: `sympy/other-${index}.py` },
+        {},
+      );
+    }
+    expect(extension.sentUserMessages.length).toBe(1);
+  });
+
+  test("an update_card call resets the progress streak", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature Z");
+    for (let index = 0; index < 11; index += 1) {
+      await extension.call(
+        `call-${index}`,
+        "read",
+        { path: `sympy/file-${index}.py` },
+        {},
+      );
+    }
+    expect(extension.sentUserMessages.length).toBe(0);
+    await extension.call("update-1", "update_card", { pending: ["x"] }, {});
+    // If the streak had not reset, this next read would be the 12th in a
+    // row and would fire the nudge immediately.
+    await extension.call(
+      "call-after-0",
+      "read",
+      { path: "sympy/other-0.py" },
+      {},
+    );
+    expect(extension.sentUserMessages.length).toBe(0);
+    for (let index = 1; index < 12; index += 1) {
+      await extension.call(
+        `call-after-${index}`,
+        "read",
+        { path: `sympy/other-${index}.py` },
+        {},
+      );
+    }
+    expect(extension.sentUserMessages.length).toBe(1);
+  });
+
+  test("the progress self-assessment nudge is capped per turn", async () => {
+    const extension = harness();
+    await extension.start();
+    await extension.input("Implement feature Z");
+    for (let index = 0; index < 40; index += 1) {
+      const toolName = index % 2 === 0 ? "read" : "bash";
+      const args =
+        toolName === "read"
+          ? { path: `sympy/file-${index}.py` }
+          : { command: `echo marker-${index}` };
+      await extension.call(`call-${index}`, toolName, args, {});
+    }
+    expect(extension.sentUserMessages.length).toBe(2);
   });
 
   test("update_card pending/findings reach the rendered card every turn", async () => {

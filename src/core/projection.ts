@@ -58,7 +58,7 @@ function isUpdateCardCall(call: ToolCall): boolean {
   return call.name === "update_card";
 }
 
-function filePath(args: Record<string, unknown>): string | undefined {
+export function filePath(args: Record<string, unknown>): string | undefined {
   for (const key of [
     "path",
     "file_path",
