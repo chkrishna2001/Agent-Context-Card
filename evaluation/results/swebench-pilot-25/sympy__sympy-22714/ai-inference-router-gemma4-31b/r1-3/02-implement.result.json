@@ -1,0 +1,197 @@
+{
+  "index": 1,
+  "name": "implement",
+  "prompt": "Implement sympy__sympy-22714 with a minimal production fix.\n\nIssue:\nsimpify gives `Imaginary coordinates are not permitted.` with evaluate(False)\n## Issue\r\n`with evaluate(False)` crashes unexpectedly with `Point2D`\r\n\r\n## Code\r\n```python\r\nimport sympy as sp\r\nwith sp.evaluate(False):\r\n  sp.S('Point2D(Integer(1),Integer(2))')\r\n```\r\n\r\n## Error\r\n```\r\nTraceback (most recent call last):\r\n  File \"<stdin>\", line 1, in <module>\r\n  File \"/home/avinash/.local/lib/python3.8/site-packages/sympy/core/sympify.py\", line 472, in sympify\r\n    expr = parse_expr(a, local_dict=locals, transformations=transformations, evaluate=evaluate)\r\n  File \"/home/avinash/.local/lib/python3.8/site-packages/sympy/parsing/sympy_parser.py\", line 1026, in parse_expr\r\n    raise e from ValueError(f\"Error from parse_expr with transformed code: {code!r}\")\r\n  File \"/home/avinash/.local/lib/python3.8/site-packages/sympy/parsing/sympy_parser.py\", line 1017, in parse_expr\r\n    rv = eval_expr(code, local_dict, global_dict)\r\n  File \"/home/avinash/.local/lib/python3.8/site-packages/sympy/parsing/sympy_parser.py\", line 911, in eval_expr\r\n    expr = eval(\r\n  File \"<string>\", line 1, in <module>\r\n  File \"/home/avinash/.local/lib/python3.8/site-packages/sympy/geometry/point.py\", line 912, in __new__\r\n    args = Point(*args, **kwargs)\r\n  File \"/home/avinash/.local/lib/python3.8/site-packages/sympy/geometry/point.py\", line 153, in __new__\r\n    raise ValueError('Imaginary coordinates are not permitted.')\r\nValueError: Imaginary coordinates are not permitted.\r\n```\r\n\r\nHowever, it works without `with evaluate(False)`. Both of following commands work\r\n```python\r\nsp.S('Point2D(Integer(1),Integer(2))')\r\nsp.S('Point2D(Integer(1),Integer(2))', evaluate=False)\r\n```\n\nInspect current source before editing and run the most relevant focused test available.",
+  "process": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stderrBytes": 0
+  },
+  "trace": {
+    "durationMs": 16578.221500000043,
+    "jsonRecords": 345,
+    "jsonErrors": [],
+    "providerRequests": 5,
+    "turns": 5,
+    "usage": {
+      "input": 2291,
+      "output": 908,
+      "cacheRead": 85920,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "totalTokens": 89119,
+      "providerInput": 88211,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    },
+    "maxRequestProviderInput": 18298,
+    "maxRequestOutput": 285,
+    "toolCalls": 4,
+    "toolErrors": 0,
+    "providerErrors": 0,
+    "duplicateToolCalls": 0,
+    "sameStateDuplicateToolCalls": 0,
+    "tools": {
+      "bash": 3,
+      "edit": 1
+    },
+    "stopReasons": {
+      "toolUse": 4,
+      "stop": 1
+    },
+    "compactions": 0,
+    "retries": 0,
+    "assistantChars": 1027,
+    "toolResultChars": 1634,
+    "requests": [
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 1350,
+          "output": 232,
+          "cacheRead": 15744,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 17326,
+          "providerInput": 17094,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789607693645
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 323,
+          "output": 81,
+          "cacheRead": 17088,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 17492,
+          "providerInput": 17411,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789607696295
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 107,
+          "output": 278,
+          "cacheRead": 17408,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 17793,
+          "providerInput": 17515,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789607697748
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 101,
+          "output": 32,
+          "cacheRead": 17792,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 17925,
+          "providerInput": 17893,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789607700533
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "stop",
+        "usage": {
+          "input": 410,
+          "output": 285,
+          "cacheRead": 17888,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 18583,
+          "providerInput": 18298,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789607707185
+      }
+    ]
+  },
+  "audit": {
+    "projectionRequests": 0,
+    "maxEstimatedProjectedTokens": 0,
+    "maxCardChars": 0,
+    "maxOriginalMessages": 0,
+    "maxProjectedMessages": 0,
+    "retiredMessages": 0,
+    "maxHotEvidence": 0,
+    "planProjectionStates": [],
+    "planProjectionModes": [],
+    "planPhaseFramingModes": [],
+    "planPhaseFramingStates": [],
+    "planRevisions": [],
+    "maxResumedChanges": 0,
+    "maxResumedFailures": 0,
+    "repositoryChanged": false,
+    "taskState": {}
+  },
+  "sessions": [
+    {
+      "file": "C:\\Users\\chkri\\source\\repos\\agent-context-card\\.agent-context-card\\e\\pilot-25\\sympy__sympy-22714\\ai-inference-router-gemma4-31b\\r1-3\\s\\2026-09-17T01-14-25-818Z_01a0aced-e09a-7270-b89a-a10f7113632b.jsonl",
+      "bytes": 11624,
+      "entries": 10,
+      "messages": 10,
+      "customEntries": 0,
+      "jsonErrors": [],
+      "projections": [],
+      "taskState": []
+    }
+  ],
+  "snapshots": [],
+  "assertions": []
+}

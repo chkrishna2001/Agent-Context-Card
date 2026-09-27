@@ -6,3 +6,4 @@ dist/
 .agent-context-card/
 __pycache__/
 *.pyc
+nul

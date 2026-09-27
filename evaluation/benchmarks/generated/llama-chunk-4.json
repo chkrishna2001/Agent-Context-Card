@@ -1,0 +1,38 @@
+[
+  {
+    "id": "django__django-13658",
+    "configPath": "evaluation/benchmarks/generated/django__django-13658.json",
+    "repo": "django/django",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "django__django-11119",
+    "configPath": "evaluation/benchmarks/generated/django__django-11119.json",
+    "repo": "django/django",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-13925",
+    "configPath": "evaluation/benchmarks/generated/django__django-13925.json",
+    "repo": "django/django",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "matplotlib__matplotlib-24627",
+    "configPath": "evaluation/benchmarks/generated/matplotlib__matplotlib-24627.json",
+    "repo": "matplotlib/matplotlib",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "sympy__sympy-15875",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-15875.json",
+    "repo": "sympy/sympy",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "pydata__xarray-4094",
+    "configPath": "evaluation/benchmarks/generated/pydata__xarray-4094.json",
+    "repo": "pydata/xarray",
+    "difficulty": "<15 min fix"
+  }
+]

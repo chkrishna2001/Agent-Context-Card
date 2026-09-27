@@ -191,15 +191,54 @@ async function workspaceSnapshot(directory) {
   return result;
 }
 
+// A model running bash commands on Windows sometimes writes to a path that
+// is a reserved device name there (nul, con, prn, aux, com1-9, lpt1-9) -
+// e.g. `2>nul` is valid Windows CMD syntax to discard stderr, but under the
+// bash-compatible shell this harness's tools run through, "nul" isn't
+// special-cased as a null device, so it just creates a literal file called
+// "nul". `git add --intent-to-add --all` then fails outright on that one
+// invalid path - not skips it, fails the whole add - which previously threw
+// away the entire patch, including any real, correct changes elsewhere in
+// the workspace. Retry excluding whichever reserved names git rejected,
+// rather than losing everything over one junk file.
+const WINDOWS_RESERVED_NAMES = [
+  "nul",
+  "con",
+  "prn",
+  "aux",
+  ...Array.from({ length: 9 }, (_, i) => `com${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`),
+];
+
 async function captureGitPatch(workspace) {
-  const intent = await runProcess(
-    "git",
-    ["add", "--intent-to-add", "--all", "--"],
-    {
-      cwd: workspace,
-      timeoutMs: 30_000,
-    },
-  );
+  const exclude = [];
+  let intent;
+  for (let attempt = 0; attempt < WINDOWS_RESERVED_NAMES.length + 1; attempt++) {
+    intent = await runProcess(
+      "git",
+      [
+        "add",
+        "--intent-to-add",
+        "--all",
+        "--",
+        ".",
+        ...exclude.map((name) => `:(exclude)${name}`),
+        ...exclude.map((name) => `:(exclude)**/${name}`),
+      ],
+      {
+        cwd: workspace,
+        timeoutMs: 30_000,
+      },
+    );
+    if (intent.exitCode === 0) break;
+    const rejected = WINDOWS_RESERVED_NAMES.find(
+      (name) =>
+        !exclude.includes(name) &&
+        intent.stderr.includes(`invalid path '${name}'`),
+    );
+    if (!rejected) break;
+    exclude.push(rejected);
+  }
   if (intent.exitCode !== 0)
     return {
       text: "",
@@ -217,6 +256,8 @@ async function captureGitPatch(workspace) {
       "--",
       ".",
       ":(exclude).agent-context-card/**",
+      ...exclude.map((name) => `:(exclude)${name}`),
+      ...exclude.map((name) => `:(exclude)**/${name}`),
     ],
     {
       cwd: workspace,

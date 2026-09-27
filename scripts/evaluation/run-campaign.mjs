@@ -127,11 +127,33 @@ async function main() {
   await mkdir(campaignRoot, { recursive: true });
 
   const summary = { done: 0, skipped: 0, badExit: 0, highErrorRate: 0 };
+  const cancelPath = path.join(campaignRoot, "CANCEL");
 
+  let cancelled = false;
   for (const model of models) {
+    if (cancelled) break;
     const modelDir = safeName(model);
     let consecutiveBad = 0;
     for (const instance of instances) {
+      // Checked between combos, never mid-run: a run.mjs invocation
+      // (repeats*2 individual runs for one instance/model) is atomic from
+      // this loop's perspective, so a cancel request always waits for the
+      // in-flight combo to finish rather than killing it mid-repeat - the
+      // whole point being to avoid the stale-workspace-directory problem
+      // that manually killing a mid-flight process caused earlier in this
+      // project. Drop a file at this exact path (any content, even empty)
+      // to request a stop; delete it before resuming.
+      try {
+        await readFile(cancelPath);
+        console.log(
+          `\nCANCELLED: found ${cancelPath} - stopping after the last completed combo (delete this file before resuming).`,
+        );
+        cancelled = true;
+        break;
+      } catch {
+        // No cancel file - keep going.
+      }
+
       const outputDir = path.join(campaignRoot, instance.id, modelDir);
       const reportPath = path.join(outputDir, "report.json");
 

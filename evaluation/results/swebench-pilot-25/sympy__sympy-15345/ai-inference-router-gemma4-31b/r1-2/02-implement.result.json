@@ -1,0 +1,263 @@
+{
+  "index": 1,
+  "name": "implement",
+  "prompt": "Implement sympy__sympy-15345 with a minimal production fix.\n\nIssue:\nmathematica_code gives wrong output with Max\nIf I run the code\r\n\r\n```\r\nx = symbols('x')\r\nmathematica_code(Max(x,2))\r\n```\r\n\r\nthen I would expect the output `'Max[x,2]'` which is valid Mathematica code but instead I get `'Max(2, x)'` which is not valid Mathematica code.\n\nInspect current source before editing and run the most relevant focused test available.",
+  "process": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stderrBytes": 0
+  },
+  "trace": {
+    "durationMs": 18003.512600000016,
+    "jsonRecords": 319,
+    "jsonErrors": [],
+    "providerRequests": 8,
+    "turns": 8,
+    "usage": {
+      "input": 1755,
+      "output": 731,
+      "cacheRead": 37248,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "totalTokens": 39734,
+      "providerInput": 39003,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    },
+    "maxRequestProviderInput": 5356,
+    "maxRequestOutput": 224,
+    "toolCalls": 7,
+    "toolErrors": 0,
+    "providerErrors": 0,
+    "duplicateToolCalls": 1,
+    "sameStateDuplicateToolCalls": 0,
+    "tools": {
+      "bash": 5,
+      "edit": 2
+    },
+    "stopReasons": {
+      "toolUse": 7,
+      "stop": 1
+    },
+    "compactions": 0,
+    "retries": 0,
+    "assistantChars": 823,
+    "toolResultChars": 849,
+    "requests": [
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 830,
+          "output": 46,
+          "cacheRead": 3648,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 4524,
+          "providerInput": 4478,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610027750
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 90,
+          "output": 124,
+          "cacheRead": 4448,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 4662,
+          "providerInput": 4538,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610030013
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 174,
+          "output": 19,
+          "cacheRead": 4512,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 4705,
+          "providerInput": 4686,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610031673
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 55,
+          "output": 224,
+          "cacheRead": 4704,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 4983,
+          "providerInput": 4759,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610034344
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 268,
+          "output": 19,
+          "cacheRead": 4736,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 5023,
+          "providerInput": 5004,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610035971
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 67,
+          "output": 46,
+          "cacheRead": 4992,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 5105,
+          "providerInput": 5059,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610038229
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 35,
+          "output": 29,
+          "cacheRead": 5088,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 5152,
+          "providerInput": 5123,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610040404
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "stop",
+        "usage": {
+          "input": 236,
+          "output": 224,
+          "cacheRead": 5120,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 5580,
+          "providerInput": 5356,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610043017
+      }
+    ]
+  },
+  "audit": {
+    "projectionRequests": 0,
+    "maxEstimatedProjectedTokens": 0,
+    "maxCardChars": 0,
+    "maxOriginalMessages": 0,
+    "maxProjectedMessages": 0,
+    "retiredMessages": 0,
+    "maxHotEvidence": 0,
+    "planProjectionStates": [],
+    "planProjectionModes": [],
+    "planPhaseFramingModes": [],
+    "planPhaseFramingStates": [],
+    "planRevisions": [],
+    "maxResumedChanges": 0,
+    "maxResumedFailures": 0,
+    "repositoryChanged": false,
+    "taskState": {}
+  },
+  "sessions": [
+    {
+      "file": "C:\\Users\\chkri\\source\\repos\\agent-context-card\\.agent-context-card\\e\\pilot-25\\sympy__sympy-15345\\ai-inference-router-gemma4-31b\\r1-2\\s\\2026-09-17T01-53-21-820Z_01a0ad11-859b-7293-9fda-d9a9968cf516.jsonl",
+      "bytes": 12005,
+      "entries": 16,
+      "messages": 16,
+      "customEntries": 0,
+      "jsonErrors": [],
+      "projections": [],
+      "taskState": []
+    }
+  ],
+  "snapshots": [],
+  "assertions": []
+}

@@ -1,0 +1,682 @@
+{
+  "name": "baseline-r3",
+  "variant": "baseline",
+  "repeat": 3,
+  "extension": false,
+  "sessionMode": "continue",
+  "model": "ai-inference-router/gemma4:31b",
+  "workspace": "C:\\Users\\chkri\\source\\repos\\agent-context-card\\.agent-context-card\\e\\pilot-25\\django__django-13658\\ai-inference-router-gemma4-31b\\r1-3\\w",
+  "turns": [
+    {
+      "index": 0,
+      "name": "plan",
+      "prompt": "Plan django__django-13658. Inspect the repository and produce a concise implementation and validation plan. Do not modify files.\n\nIssue:\nManagementUtility instantiates CommandParser without passing already-computed prog argument\nDescription\n\t\nManagementUtility ​goes to the trouble to parse the program name from the argv it's passed rather than from sys.argv: \n\tdef __init__(self, argv=None):\n\t\tself.argv = argv or sys.argv[:]\n\t\tself.prog_name = os.path.basename(self.argv[0])\n\t\tif self.prog_name == '__main__.py':\n\t\t\tself.prog_name = 'python -m django'\nBut then when it needs to parse --pythonpath and --settings, it ​uses the program name from sys.argv: \n\t\tparser = CommandParser(usage='%(prog)s subcommand [options] [args]', add_help=False, allow_abbrev=False)\nAbove \"%(prog)s\" ​refers to sys.argv[0]. Instead, it should refer to self.prog_name. This can fixed as follows:\n\t\tparser = CommandParser(\n\t\t\tprog=self.prog_name,\n\t\t\tusage='%(prog)s subcommand [options] [args]',\n\t\t\tadd_help=False,\n\t\t\tallow_abbrev=False)\nI'm aware that execute_from_command_line is a private API, but it'd be really convenient for me if it worked properly in my weird embedded environment where sys.argv[0] is ​incorrectly None. If passing my own argv to execute_from_command_line avoided all the ensuing exceptions, I wouldn't have to modify sys.argv[0] globally as I'm doing in the meantime.",
+      "process": {
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "stderrBytes": 0
+      },
+      "trace": {
+        "durationMs": 14513.486700000009,
+        "jsonRecords": 1129,
+        "jsonErrors": [],
+        "providerRequests": 3,
+        "turns": 3,
+        "usage": {
+          "input": 5992,
+          "output": 1143,
+          "cacheRead": 3488,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 10623,
+          "providerInput": 9480,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "maxRequestProviderInput": 6348,
+        "maxRequestOutput": 1098,
+        "toolCalls": 2,
+        "toolErrors": 0,
+        "providerErrors": 0,
+        "duplicateToolCalls": 0,
+        "sameStateDuplicateToolCalls": 0,
+        "tools": {
+          "bash": 1,
+          "read": 1
+        },
+        "stopReasons": {
+          "toolUse": 2,
+          "stop": 1
+        },
+        "compactions": 0,
+        "retries": 0,
+        "assistantChars": 4126,
+        "toolResultChars": 17836,
+        "requests": [
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 1086,
+              "output": 20,
+              "cacheRead": 416,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 1522,
+              "providerInput": 1502,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608899418
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 158,
+              "output": 25,
+              "cacheRead": 1472,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 1655,
+              "providerInput": 1630,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608902337
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "stop",
+            "usage": {
+              "input": 4748,
+              "output": 1098,
+              "cacheRead": 1600,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 7446,
+              "providerInput": 6348,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608904558
+          }
+        ]
+      },
+      "audit": {
+        "projectionRequests": 0,
+        "maxEstimatedProjectedTokens": 0,
+        "maxCardChars": 0,
+        "maxOriginalMessages": 0,
+        "maxProjectedMessages": 0,
+        "retiredMessages": 0,
+        "maxHotEvidence": 0,
+        "planProjectionStates": [],
+        "planProjectionModes": [],
+        "planPhaseFramingModes": [],
+        "planPhaseFramingStates": [],
+        "planRevisions": [],
+        "maxResumedChanges": 0,
+        "maxResumedFailures": 0,
+        "repositoryChanged": false,
+        "taskState": {}
+      },
+      "sessions": [
+        {
+          "file": "C:\\Users\\chkri\\source\\repos\\agent-context-card\\.agent-context-card\\e\\pilot-25\\django__django-13658\\ai-inference-router-gemma4-31b\\r1-3\\s\\2026-09-17T01-34-59-351Z_01a0ad00-b317-7c1c-93a0-0c6dbbf132bb.jsonl",
+          "bytes": 27300,
+          "entries": 9,
+          "messages": 6,
+          "customEntries": 0,
+          "jsonErrors": [],
+          "projections": [],
+          "taskState": []
+        }
+      ],
+      "snapshots": [],
+      "assertions": []
+    },
+    {
+      "index": 1,
+      "name": "implement",
+      "prompt": "Implement django__django-13658 with a minimal production fix.\n\nIssue:\nManagementUtility instantiates CommandParser without passing already-computed prog argument\nDescription\n\t\nManagementUtility ​goes to the trouble to parse the program name from the argv it's passed rather than from sys.argv: \n\tdef __init__(self, argv=None):\n\t\tself.argv = argv or sys.argv[:]\n\t\tself.prog_name = os.path.basename(self.argv[0])\n\t\tif self.prog_name == '__main__.py':\n\t\t\tself.prog_name = 'python -m django'\nBut then when it needs to parse --pythonpath and --settings, it ​uses the program name from sys.argv: \n\t\tparser = CommandParser(usage='%(prog)s subcommand [options] [args]', add_help=False, allow_abbrev=False)\nAbove \"%(prog)s\" ​refers to sys.argv[0]. Instead, it should refer to self.prog_name. This can fixed as follows:\n\t\tparser = CommandParser(\n\t\t\tprog=self.prog_name,\n\t\t\tusage='%(prog)s subcommand [options] [args]',\n\t\t\tadd_help=False,\n\t\t\tallow_abbrev=False)\nI'm aware that execute_from_command_line is a private API, but it'd be really convenient for me if it worked properly in my weird embedded environment where sys.argv[0] is ​incorrectly None. If passing my own argv to execute_from_command_line avoided all the ensuing exceptions, I wouldn't have to modify sys.argv[0] globally as I'm doing in the meantime.\n\nInspect current source before editing and run the most relevant focused test available.",
+      "process": {
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "stderrBytes": 0
+      },
+      "trace": {
+        "durationMs": 29870.01800000004,
+        "jsonRecords": 406,
+        "jsonErrors": [],
+        "providerRequests": 7,
+        "turns": 7,
+        "usage": {
+          "input": 7536,
+          "output": 1561,
+          "cacheRead": 81056,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 90153,
+          "providerInput": 88592,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "maxRequestProviderInput": 14180,
+        "maxRequestOutput": 684,
+        "toolCalls": 6,
+        "toolErrors": 0,
+        "providerErrors": 0,
+        "duplicateToolCalls": 0,
+        "sameStateDuplicateToolCalls": 0,
+        "tools": {
+          "read": 1,
+          "write": 2,
+          "bash": 2,
+          "edit": 1
+        },
+        "stopReasons": {
+          "toolUse": 6,
+          "stop": 1
+        },
+        "compactions": 0,
+        "retries": 0,
+        "assistantChars": 1285,
+        "toolResultChars": 18747,
+        "requests": [
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 1507,
+              "output": 21,
+              "cacheRead": 6336,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 7864,
+              "providerInput": 7843,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608913886
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 4749,
+              "output": 684,
+              "cacheRead": 7808,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 13241,
+              "providerInput": 12557,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608916310
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 721,
+              "output": 22,
+              "cacheRead": 12544,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 13287,
+              "providerInput": 13265,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608922045
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 74,
+              "output": 124,
+              "cacheRead": 13280,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 13478,
+              "providerInput": 13354,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608925150
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 159,
+              "output": 356,
+              "cacheRead": 13344,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 13859,
+              "providerInput": 13503,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608927934
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 34,
+              "output": 25,
+              "cacheRead": 13856,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 13915,
+              "providerInput": 13890,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608931546
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "stop",
+            "usage": {
+              "input": 292,
+              "output": 329,
+              "cacheRead": 13888,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 14509,
+              "providerInput": 14180,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608933664
+          }
+        ]
+      },
+      "audit": {
+        "projectionRequests": 0,
+        "maxEstimatedProjectedTokens": 0,
+        "maxCardChars": 0,
+        "maxOriginalMessages": 0,
+        "maxProjectedMessages": 0,
+        "retiredMessages": 0,
+        "maxHotEvidence": 0,
+        "planProjectionStates": [],
+        "planProjectionModes": [],
+        "planPhaseFramingModes": [],
+        "planPhaseFramingStates": [],
+        "planRevisions": [],
+        "maxResumedChanges": 0,
+        "maxResumedFailures": 0,
+        "repositoryChanged": false,
+        "taskState": {}
+      },
+      "sessions": [
+        {
+          "file": "C:\\Users\\chkri\\source\\repos\\agent-context-card\\.agent-context-card\\e\\pilot-25\\django__django-13658\\ai-inference-router-gemma4-31b\\r1-3\\s\\2026-09-17T01-34-59-351Z_01a0ad00-b317-7c1c-93a0-0c6dbbf132bb.jsonl",
+          "bytes": 34071,
+          "entries": 14,
+          "messages": 14,
+          "customEntries": 0,
+          "jsonErrors": [],
+          "projections": [],
+          "taskState": []
+        }
+      ],
+      "snapshots": [],
+      "assertions": []
+    },
+    {
+      "index": 2,
+      "name": "review",
+      "prompt": "Review django__django-13658 against the issue. Inspect the current diff and run only a bounded direct reproduction or one focused test; do not run broad suites or install dependencies. Fix only correctness problems you find. The official benchmark harness will perform final grading.",
+      "process": {
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "stderrBytes": 0
+      },
+      "trace": {
+        "durationMs": 9706.578699999955,
+        "jsonRecords": 242,
+        "jsonErrors": [],
+        "providerRequests": 3,
+        "turns": 3,
+        "usage": {
+          "input": 1009,
+          "output": 252,
+          "cacheRead": 43584,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 44845,
+          "providerInput": 44593,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "maxRequestProviderInput": 15155,
+        "maxRequestOutput": 209,
+        "toolCalls": 2,
+        "toolErrors": 0,
+        "providerErrors": 0,
+        "duplicateToolCalls": 0,
+        "sameStateDuplicateToolCalls": 0,
+        "tools": {
+          "bash": 2
+        },
+        "stopReasons": {
+          "toolUse": 2,
+          "stop": 1
+        },
+        "compactions": 0,
+        "retries": 0,
+        "assistantChars": 900,
+        "toolResultChars": 1836,
+        "requests": [
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 397,
+              "output": 14,
+              "cacheRead": 14176,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 14587,
+              "providerInput": 14573,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608943838
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "toolUse",
+            "usage": {
+              "input": 305,
+              "output": 29,
+              "cacheRead": 14560,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 14894,
+              "providerInput": 14865,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608947784
+          },
+          {
+            "provider": "ai-inference-router",
+            "model": "gemma4:31b",
+            "stopReason": "stop",
+            "usage": {
+              "input": 307,
+              "output": 209,
+              "cacheRead": 14848,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 15364,
+              "providerInput": 15155,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "timestamp": 1789608949875
+          }
+        ]
+      },
+      "audit": {
+        "projectionRequests": 0,
+        "maxEstimatedProjectedTokens": 0,
+        "maxCardChars": 0,
+        "maxOriginalMessages": 0,
+        "maxProjectedMessages": 0,
+        "retiredMessages": 0,
+        "maxHotEvidence": 0,
+        "planProjectionStates": [],
+        "planProjectionModes": [],
+        "planPhaseFramingModes": [],
+        "planPhaseFramingStates": [],
+        "planRevisions": [],
+        "maxResumedChanges": 0,
+        "maxResumedFailures": 0,
+        "repositoryChanged": false,
+        "taskState": {}
+      },
+      "sessions": [
+        {
+          "file": "C:\\Users\\chkri\\source\\repos\\agent-context-card\\.agent-context-card\\e\\pilot-25\\django__django-13658\\ai-inference-router-gemma4-31b\\r1-3\\s\\2026-09-17T01-34-59-351Z_01a0ad00-b317-7c1c-93a0-0c6dbbf132bb.jsonl",
+          "bytes": 5444,
+          "entries": 6,
+          "messages": 6,
+          "customEntries": 0,
+          "jsonErrors": [],
+          "projections": [],
+          "taskState": []
+        }
+      ],
+      "snapshots": [],
+      "assertions": []
+    }
+  ],
+  "aggregate": {
+    "durationMs": 54090.0834,
+    "providerRequests": 13,
+    "turns": 13,
+    "usage": {
+      "input": 14537,
+      "output": 2956,
+      "cacheRead": 128128,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "totalTokens": 145621,
+      "providerInput": 142665,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    },
+    "maxRequestProviderInput": 15155,
+    "maxRequestOutput": 1098,
+    "toolCalls": 10,
+    "toolErrors": 0,
+    "providerErrors": 0,
+    "duplicateToolCalls": 0,
+    "sameStateDuplicateToolCalls": 0,
+    "tools": {
+      "bash": 5,
+      "read": 2,
+      "write": 2,
+      "edit": 1
+    },
+    "stopReasons": {
+      "toolUse": 10,
+      "stop": 3
+    },
+    "compactions": 0,
+    "retries": 0,
+    "assistantChars": 6311,
+    "toolResultChars": 38419,
+    "jsonErrors": 0
+  },
+  "validation": {
+    "commands": [],
+    "files": [],
+    "pass": true
+  },
+  "modelPatch": {
+    "text": "diff --git a/django/core/management/__init__.py b/django/core/management/__init__.py\nindex 1ba093e51f..4e30a28f33 100644\n--- a/django/core/management/__init__.py\n+++ b/django/core/management/__init__.py\n@@ -344,7 +344,12 @@ class ManagementUtility:\n         # Preprocess options to extract --settings and --pythonpath.\n         # These options could affect the commands that are available, so they\n         # must be processed early.\n-        parser = CommandParser(usage='%(prog)s subcommand [options] [args]', add_help=False, allow_abbrev=False)\n+        parser = CommandParser(\n+            prog=self.prog_name,\n+            usage='%(prog)s subcommand [options] [args]',\n+            add_help=False,\n+            allow_abbrev=False,\n+        )\n         parser.add_argument('--settings')\n         parser.add_argument('--pythonpath')\n         parser.add_argument('args', nargs='*')  # catch-all\ndiff --git a/test_management_utility_prog.py b/test_management_utility_prog.py\nnew file mode 100644\nindex 0000000000..e0e5fabda0\n--- /dev/null\n+++ b/test_management_utility_prog.py\n@@ -0,0 +1,63 @@\n+\n+import sys\n+import os\n+from django.core.management import execute_from_command_line, ManagementUtility\n+from django.core.management.base import CommandParser\n+\n+def test_prog_name_usage():\n+    print(\"Testing CommandParser with sys.argv[0] = None\")\n+    \n+    # Save original argv\n+    original_argv = sys.argv[:]\n+    try:\n+        # Simulate the \"weird embedded environment\" where sys.argv[0] is None\n+        sys.argv = [None]\n+        \n+        # Custom argv passed to execute_from_command_line\n+        custom_argv = [\"my_custom_prog\", \"help\"]\n+        \n+        # We want to check if ManagementUtility.execute's CommandParser \n+        # uses self.prog_name instead of sys.argv[0].\n+        \n+        # To test this without triggering full Django setup or exiting, \n+        # we can instantiate ManagementUtility and call execute with mocked parts\n+        # or just see if it crashes.\n+        \n+        utility = ManagementUtility(custom_argv)\n+        print(f\"Computed prog_name: {utility.prog_name}\")\n+        \n+        # The problematic line is:\n+        # parser = CommandParser(usage='%(prog)s subcommand [options] [args]', add_help=False, allow_abbrev=False)\n+        # If we pass prog=utility.prog_name, it should be fine.\n+        # If we don't, it uses sys.argv[0] which is None.\n+        \n+        # Let's try to trigger the parser's usage output.\n+        # Since ManagementUtility.execute catches CommandError, we can test the parser directly\n+        # as it is used in the code.\n+        \n+        # Case 1: No prog passed (simulating old behavior)\n+        try:\n+            parser_old = CommandParser(usage='%(prog)s subcommand [options] [args]', add_help=False, allow_abbrev=False)\n+            # Trigger an error that would print usage. \n+            # argparse prints to stderr and calls sys.exit.\n+            # We can check parser_old.prog\n+            print(f\"Parser old prog: {parser_old.prog}\")\n+        except Exception as e:\n+            print(f\"Parser old failed: {e}\")\n+\n+        # Case 2: prog passed (simulating new behavior)\n+        parser_new = CommandParser(\n+            prog=utility.prog_name,\n+            usage='%(prog)s subcommand [options] [args]', \n+            add_help=False, \n+            allow_abbrev=False\n+        )\n+        print(f\"Parser new prog: {parser_new.prog}\")\n+        \n+        assert parser_new.prog == \"my_custom_prog\"\n+        \n+    finally:\n+        sys.argv = original_argv\n+\n+if __name__ == \"__main__\":\n+    test_prog_name_usage()\ndiff --git a/test_management_utility_prog_v2.py b/test_management_utility_prog_v2.py\nnew file mode 100644\nindex 0000000000..408c96282f\n--- /dev/null\n+++ b/test_management_utility_prog_v2.py\n@@ -0,0 +1,37 @@\n+\n+import sys\n+import os\n+from django.core.management import execute_from_command_line, ManagementUtility\n+from django.core.management.base import CommandParser\n+\n+def test_prog_name_usage():\n+    print(\"Testing ManagementUtility.execute with sys.argv[0] = None\")\n+    \n+    # Save original argv\n+    original_argv = sys.argv[:]\n+    try:\n+        # Simulate the \"weird embedded environment\" where sys.argv[0] is None\n+        sys.argv = [None]\n+        \n+        # Custom argv passed to execute_from_command_line\n+        custom_argv = [\"my_custom_prog\", \"help\"]\n+        \n+        # Instantiate ManagementUtility\n+        utility = ManagementUtility(custom_argv)\n+        print(f\"Computed prog_name: {utility.prog_name}\")\n+        \n+        # Try to execute. This should no longer crash during CommandParser instantiation.\n+        # Since we are in a test environment without a full Django setup, \n+        # it might fail later in execute() but it should get past the CommandParser.\n+        try:\n+            utility.execute()\n+        except Exception as e:\n+            print(f\"Caught expected exception later in execute: {type(e).__name__}: {e}\")\n+        \n+        print(\"Successfully passed CommandParser instantiation!\")\n+        \n+    finally:\n+        sys.argv = original_argv\n+\n+if __name__ == \"__main__\":\n+    test_prog_name_usage()\n",
+    "bytes": 5156,
+    "sha256": "6f7dc3cc2ed50c589b73e70f962aff82c9f433c444109a0ebc3abecffad935ba"
+  },
+  "predictionPath": "C:\\Users\\chkri\\source\\repos\\agent-context-card\\.agent-context-card\\e\\pilot-25\\django__django-13658\\ai-inference-router-gemma4-31b\\r1-3\\prediction.json",
+  "workspaceChanges": {
+    "added": [
+      "django/__pycache__/__init__.cpython-314.pyc",
+      "django/apps/__pycache__/__init__.cpython-314.pyc",
+      "django/apps/__pycache__/config.cpython-314.pyc",
+      "django/apps/__pycache__/registry.cpython-314.pyc",
+      "django/conf/__pycache__/__init__.cpython-314.pyc",
+      "django/conf/__pycache__/global_settings.cpython-314.pyc",
+      "django/conf/locale/__pycache__/__init__.cpython-314.pyc",
+      "django/core/__pycache__/__init__.cpython-314.pyc",
+      "django/core/__pycache__/exceptions.cpython-314.pyc",
+      "django/core/__pycache__/signals.cpython-314.pyc",
+      "django/core/__pycache__/validators.cpython-314.pyc",
+      "django/core/cache/__pycache__/__init__.cpython-314.pyc",
+      "django/core/cache/backends/__pycache__/__init__.cpython-314.pyc",
+      "django/core/cache/backends/__pycache__/base.cpython-314.pyc",
+      "django/core/cache/backends/__pycache__/filebased.cpython-314.pyc",
+      "django/core/checks/__pycache__/__init__.cpython-314.pyc",
+      "django/core/checks/__pycache__/async_checks.cpython-314.pyc",
+      "django/core/checks/__pycache__/caches.cpython-314.pyc",
+      "django/core/checks/__pycache__/database.cpython-314.pyc",
+      "django/core/checks/__pycache__/messages.cpython-314.pyc",
+      "django/core/checks/__pycache__/model_checks.cpython-314.pyc",
+      "django/core/checks/__pycache__/registry.cpython-314.pyc",
+      "django/core/checks/__pycache__/templates.cpython-314.pyc",
+      "django/core/checks/__pycache__/translation.cpython-314.pyc",
+      "django/core/checks/__pycache__/urls.cpython-314.pyc",
+      "django/core/checks/security/__pycache__/__init__.cpython-314.pyc",
+      "django/core/checks/security/__pycache__/base.cpython-314.pyc",
+      "django/core/checks/security/__pycache__/csrf.cpython-314.pyc",
+      "django/core/checks/security/__pycache__/sessions.cpython-314.pyc",
+      "django/core/files/__pycache__/__init__.cpython-314.pyc",
+      "django/core/files/__pycache__/base.cpython-314.pyc",
+      "django/core/files/__pycache__/locks.cpython-314.pyc",
+      "django/core/files/__pycache__/move.cpython-314.pyc",
+      "django/core/files/__pycache__/utils.cpython-314.pyc",
+      "django/core/management/__pycache__/__init__.cpython-314.pyc",
+      "django/core/management/__pycache__/base.cpython-314.pyc",
+      "django/core/management/__pycache__/color.cpython-314.pyc",
+      "django/db/__pycache__/__init__.cpython-314.pyc",
+      "django/db/__pycache__/utils.cpython-314.pyc",
+      "django/dispatch/__pycache__/__init__.cpython-314.pyc",
+      "django/dispatch/__pycache__/dispatcher.cpython-314.pyc",
+      "django/utils/__pycache__/__init__.cpython-314.pyc",
+      "django/utils/__pycache__/autoreload.cpython-314.pyc",
+      "django/utils/__pycache__/deconstruct.cpython-314.pyc",
+      "django/utils/__pycache__/deprecation.cpython-314.pyc",
+      "django/utils/__pycache__/encoding.cpython-314.pyc",
+      "django/utils/__pycache__/functional.cpython-314.pyc",
+      "django/utils/__pycache__/hashable.cpython-314.pyc",
+      "django/utils/__pycache__/inspect.cpython-314.pyc",
+      "django/utils/__pycache__/ipv6.cpython-314.pyc",
+      "django/utils/__pycache__/itercompat.cpython-314.pyc",
+      "django/utils/__pycache__/module_loading.cpython-314.pyc",
+      "django/utils/__pycache__/regex_helper.cpython-314.pyc",
+      "django/utils/__pycache__/safestring.cpython-314.pyc",
+      "django/utils/__pycache__/termcolors.cpython-314.pyc",
+      "django/utils/__pycache__/version.cpython-314.pyc",
+      "django/utils/translation/__pycache__/__init__.cpython-314.pyc",
+      "django/utils/translation/__pycache__/trans_real.cpython-314.pyc",
+      "test_management_utility_prog.py",
+      "test_management_utility_prog_v2.py"
+    ],
+    "deleted": [],
+    "changed": [
+      "django/core/management/__init__.py"
+    ]
+  },
+  "runOk": true
+}

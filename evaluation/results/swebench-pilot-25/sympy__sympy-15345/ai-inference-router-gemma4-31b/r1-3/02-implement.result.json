@@ -1,0 +1,308 @@
+{
+  "index": 1,
+  "name": "implement",
+  "prompt": "Implement sympy__sympy-15345 with a minimal production fix.\n\nIssue:\nmathematica_code gives wrong output with Max\nIf I run the code\r\n\r\n```\r\nx = symbols('x')\r\nmathematica_code(Max(x,2))\r\n```\r\n\r\nthen I would expect the output `'Max[x,2]'` which is valid Mathematica code but instead I get `'Max(2, x)'` which is not valid Mathematica code.\n\nInspect current source before editing and run the most relevant focused test available.",
+  "process": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stderrBytes": 0
+  },
+  "trace": {
+    "durationMs": 20390.269499999995,
+    "jsonRecords": 321,
+    "jsonErrors": [],
+    "providerRequests": 10,
+    "turns": 10,
+    "usage": {
+      "input": 5308,
+      "output": 1007,
+      "cacheRead": 65440,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "totalTokens": 71755,
+      "providerInput": 70748,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    },
+    "maxRequestProviderInput": 8986,
+    "maxRequestOutput": 249,
+    "toolCalls": 9,
+    "toolErrors": 1,
+    "providerErrors": 0,
+    "duplicateToolCalls": 4,
+    "sameStateDuplicateToolCalls": 0,
+    "tools": {
+      "read": 2,
+      "bash": 5,
+      "edit": 2
+    },
+    "stopReasons": {
+      "toolUse": 9,
+      "stop": 1
+    },
+    "compactions": 0,
+    "retries": 0,
+    "assistantChars": 707,
+    "toolResultChars": 10939,
+    "requests": [
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 775,
+          "output": 20,
+          "cacheRead": 3616,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 4411,
+          "providerInput": 4391,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610118917
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 1564,
+          "output": 86,
+          "cacheRead": 4384,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 6034,
+          "providerInput": 5948,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610120156
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 48,
+          "output": 187,
+          "cacheRead": 6016,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 6251,
+          "providerInput": 6064,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610122310
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 227,
+          "output": 90,
+          "cacheRead": 6048,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 6365,
+          "providerInput": 6275,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610124008
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 119,
+          "output": 33,
+          "cacheRead": 6272,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 6424,
+          "providerInput": 6391,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610126344
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 454,
+          "output": 24,
+          "cacheRead": 6368,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 6846,
+          "providerInput": 6822,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610128870
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 1548,
+          "output": 249,
+          "cacheRead": 6816,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 8613,
+          "providerInput": 8364,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610130101
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 285,
+          "output": 29,
+          "cacheRead": 8352,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 8666,
+          "providerInput": 8637,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610132001
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "toolUse",
+        "usage": {
+          "input": 230,
+          "output": 86,
+          "cacheRead": 8640,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 8956,
+          "providerInput": 8870,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610134233
+      },
+      {
+        "provider": "ai-inference-router",
+        "model": "gemma4:31b",
+        "stopReason": "stop",
+        "usage": {
+          "input": 58,
+          "output": 203,
+          "cacheRead": 8928,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 9189,
+          "providerInput": 8986,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "timestamp": 1789610136412
+      }
+    ]
+  },
+  "audit": {
+    "projectionRequests": 0,
+    "maxEstimatedProjectedTokens": 0,
+    "maxCardChars": 0,
+    "maxOriginalMessages": 0,
+    "maxProjectedMessages": 0,
+    "retiredMessages": 0,
+    "maxHotEvidence": 0,
+    "planProjectionStates": [],
+    "planProjectionModes": [],
+    "planPhaseFramingModes": [],
+    "planPhaseFramingStates": [],
+    "planRevisions": [],
+    "maxResumedChanges": 0,
+    "maxResumedFailures": 0,
+    "repositoryChanged": false,
+    "taskState": {}
+  },
+  "sessions": [
+    {
+      "file": "C:\\Users\\chkri\\source\\repos\\agent-context-card\\.agent-context-card\\e\\pilot-25\\sympy__sympy-15345\\ai-inference-router-gemma4-31b\\r1-3\\s\\2026-09-17T01-54-51-990Z_01a0ad12-e5d6-7ae3-93ec-218ac707ab9e.jsonl",
+      "bytes": 25790,
+      "entries": 20,
+      "messages": 20,
+      "customEntries": 0,
+      "jsonErrors": [],
+      "projections": [],
+      "taskState": []
+    }
+  ],
+  "snapshots": [],
+  "assertions": []
+}

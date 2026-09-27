@@ -1,0 +1,8 @@
+[
+  {
+    "id": "pylint-dev__pylint-4551",
+    "configPath": "evaluation/benchmarks/generated/pylint-dev__pylint-4551.json",
+    "repo": "pylint-dev/pylint",
+    "difficulty": "1-4 hours"
+  }
+]

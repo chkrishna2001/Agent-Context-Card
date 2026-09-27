@@ -1,0 +1,14 @@
+[
+  {
+    "id": "sphinx-doc__sphinx-8593",
+    "configPath": "evaluation/benchmarks/generated/sphinx-doc__sphinx-8593.json",
+    "repo": "sphinx-doc/sphinx",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "pylint-dev__pylint-4551",
+    "configPath": "evaluation/benchmarks/generated/pylint-dev__pylint-4551.json",
+    "repo": "pylint-dev/pylint",
+    "difficulty": "1-4 hours"
+  }
+]

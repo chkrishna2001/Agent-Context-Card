@@ -1,0 +1,7 @@
+[
+  {
+    "instance_id": "sympy__sympy-15345",
+    "model_name_or_path": "SWE-bench-Verified-sympy__sympy-15345-baseline-r3-ai-inference-router-gemma4-31b",
+    "model_patch": "diff --git a/reproduce_issue.py b/reproduce_issue.py\nnew file mode 100644\nindex 0000000000..ac33db3f70\n--- /dev/null\n+++ b/reproduce_issue.py\n@@ -0,0 +1,4 @@\n+from sympy import symbols, Max, mathematica_code\n+\n+x = symbols('x')\n+print(f\"Max(x, 2) -> {mathematica_code(Max(x, 2))}\")\ndiff --git a/sympy/printing/mathematica.py b/sympy/printing/mathematica.py\nindex ea7e3a2d94..fe5b360a38 100644\n--- a/sympy/printing/mathematica.py\n+++ b/sympy/printing/mathematica.py\n@@ -111,12 +111,19 @@ def _print_Integral(self, expr):\n     def _print_Sum(self, expr):\n         return \"Hold[Sum[\" + ', '.join(self.doprint(a) for a in expr.args) + \"]]\"\n \n+    def _print_Max(self, expr):\n+        return \"Max[%s]\" % self.stringify(expr.args, \", \")\n+\n+    def _print_Min(self, expr):\n+        return \"Min[%s]\" % self.stringify(expr.args, \", \")\n+\n     def _print_Derivative(self, expr):\n         dexpr = expr.expr\n         dvars = [i[0] if i[1] == 1 else i for i in expr.variable_count]\n         return \"Hold[D[\" + ', '.join(self.doprint(a) for a in [dexpr] + dvars) + \"]]\"\n \n \n+\n def mathematica_code(expr, **settings):\n     r\"\"\"Converts an expr to a string of the Wolfram Mathematica code\n \n"
+  }
+]

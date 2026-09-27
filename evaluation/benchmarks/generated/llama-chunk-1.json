@@ -1,0 +1,44 @@
+[
+  {
+    "id": "sphinx-doc__sphinx-8593",
+    "configPath": "evaluation/benchmarks/generated/sphinx-doc__sphinx-8593.json",
+    "repo": "sphinx-doc/sphinx",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "sympy__sympy-15345",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-15345.json",
+    "repo": "sympy/sympy",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-14580",
+    "configPath": "evaluation/benchmarks/generated/django__django-14580.json",
+    "repo": "django/django",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "sympy__sympy-15809",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-15809.json",
+    "repo": "sympy/sympy",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-15987",
+    "configPath": "evaluation/benchmarks/generated/django__django-15987.json",
+    "repo": "django/django",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "django__django-13670",
+    "configPath": "evaluation/benchmarks/generated/django__django-13670.json",
+    "repo": "django/django",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "django__django-12708",
+    "configPath": "evaluation/benchmarks/generated/django__django-12708.json",
+    "repo": "django/django",
+    "difficulty": "1-4 hours"
+  }
+]

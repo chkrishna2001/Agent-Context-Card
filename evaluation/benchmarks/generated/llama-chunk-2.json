@@ -1,0 +1,38 @@
+[
+  {
+    "id": "pylint-dev__pylint-4551",
+    "configPath": "evaluation/benchmarks/generated/pylint-dev__pylint-4551.json",
+    "repo": "pylint-dev/pylint",
+    "difficulty": "1-4 hours"
+  },
+  {
+    "id": "sympy__sympy-15976",
+    "configPath": "evaluation/benchmarks/generated/sympy__sympy-15976.json",
+    "repo": "sympy/sympy",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "pydata__xarray-6744",
+    "configPath": "evaluation/benchmarks/generated/pydata__xarray-6744.json",
+    "repo": "pydata/xarray",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "matplotlib__matplotlib-24570",
+    "configPath": "evaluation/benchmarks/generated/matplotlib__matplotlib-24570.json",
+    "repo": "matplotlib/matplotlib",
+    "difficulty": "<15 min fix"
+  },
+  {
+    "id": "sphinx-doc__sphinx-8551",
+    "configPath": "evaluation/benchmarks/generated/sphinx-doc__sphinx-8551.json",
+    "repo": "sphinx-doc/sphinx",
+    "difficulty": "15 min - 1 hour"
+  },
+  {
+    "id": "astropy__astropy-13033",
+    "configPath": "evaluation/benchmarks/generated/astropy__astropy-13033.json",
+    "repo": "astropy/astropy",
+    "difficulty": "15 min - 1 hour"
+  }
+]

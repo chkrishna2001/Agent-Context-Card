@@ -1,0 +1,7 @@
+[
+  {
+    "instance_id": "sympy__sympy-15345",
+    "model_name_or_path": "SWE-bench-Verified-sympy__sympy-15345-baseline-r2-ai-inference-router-gemma4-31b",
+    "model_patch": "diff --git a/reproduce_issue.py b/reproduce_issue.py\nnew file mode 100644\nindex 0000000000..57f1beda16\n--- /dev/null\n+++ b/reproduce_issue.py\n@@ -0,0 +1,15 @@\n+from sympy import symbols, Max, mathematica_code\n+\n+def test_max():\n+    x = symbols('x')\n+    result = mathematica_code(Max(x, 2))\n+    print(f\"Input: Max(x, 2)\")\n+    print(f\"Output: {result}\")\n+    assert 'Max[' in result and ']' in result, f\"Expected square brackets in output, but got '{result}'\"\n+\n+if __name__ == \"__main__\":\n+    try:\n+        test_max()\n+        print(\"Test passed!\")\n+    except AssertionError as e:\n+        print(f\"Test failed: {e}\")\ndiff --git a/sympy/printing/mathematica.py b/sympy/printing/mathematica.py\nindex ea7e3a2d94..465f14eee5 100644\n--- a/sympy/printing/mathematica.py\n+++ b/sympy/printing/mathematica.py\n@@ -93,6 +93,12 @@ def _print_list(self, expr):\n     _print_tuple = _print_list\n     _print_Tuple = _print_list\n \n+    def _print_Max(self, expr):\n+        return \"Max[%s]\" % self.stringify(expr.args, \", \")\n+\n+    def _print_Min(self, expr):\n+        return \"Min[%s]\" % self.stringify(expr.args, \", \")\n+\n     def _print_Function(self, expr):\n         if expr.func.__name__ in self.known_functions:\n             cond_mfunc = self.known_functions[expr.func.__name__]\n"
+  }
+]

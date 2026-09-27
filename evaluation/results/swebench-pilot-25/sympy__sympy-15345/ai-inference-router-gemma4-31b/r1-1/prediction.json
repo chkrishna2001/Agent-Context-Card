@@ -1,0 +1,7 @@
+[
+  {
+    "instance_id": "sympy__sympy-15345",
+    "model_name_or_path": "SWE-bench-Verified-sympy__sympy-15345-baseline-r1-ai-inference-router-gemma4-31b",
+    "model_patch": "diff --git a/repro.py b/repro.py\nnew file mode 100644\nindex 0000000000..b31300d0fd\n--- /dev/null\n+++ b/repro.py\n@@ -0,0 +1,3 @@\n+from sympy import symbols, Max, mathematica_code\n+x = symbols('x')\n+print(f\"Max(x, 2) -> {mathematica_code(Max(x, 2))}\")\ndiff --git a/sympy/printing/mathematica.py b/sympy/printing/mathematica.py\nindex ea7e3a2d94..9025bdae5f 100644\n--- a/sympy/printing/mathematica.py\n+++ b/sympy/printing/mathematica.py\n@@ -88,11 +88,18 @@ def _print_Infinity(self, expr):\n     def _print_NegativeInfinity(self, expr):\n         return '-Infinity'\n \n+    def _print_Max(self, expr):\n+        return \"Max[%s]\" % self.stringify(expr.args, \", \")\n+\n+    def _print_Min(self, expr):\n+        return \"Min[%s]\" % self.stringify(expr.args, \", \")\n+\n     def _print_list(self, expr):\n         return '{' + ', '.join(self.doprint(a) for a in expr) + '}'\n     _print_tuple = _print_list\n     _print_Tuple = _print_list\n \n+\n     def _print_Function(self, expr):\n         if expr.func.__name__ in self.known_functions:\n             cond_mfunc = self.known_functions[expr.func.__name__]\n"
+  }
+]
