@@ -4,7 +4,7 @@
 gated on kimi ten-turn n=3: within-turn caching is fixed (later-request
 uncached input -42%, near baseline), but turn-first misses from boundary
 retirement are unchanged, so kimi effective cost is still ~+50% vs baseline.
-Haiku (the case the breakpoint fix targets) is not yet run. See the
+Haiku (the case the breakpoint fix targets) was declined; it stays unverified. See the
 2026-10-06 section of `docs/notes/prompt-cache-effect-2026-10-05.md`.**
 
 ## What we're working on
@@ -88,11 +88,9 @@ plain rg/grep rounds were fully covered by a later read.
    card/status/history pinned per user turn (`turnPinned` in the audit).
    kimi n=3: correctness intact, effective cost unchanged (+50.8% median).
    The remaining cost is one miss per turn from boundary retirement.
-5. Next: (a) Haiku: first a cheap card-only check that within-turn requests
-   read cache at all (`--variant card`, no repeats; prompts must exceed
-   Haiku's ~4k minimum cacheable size, else use SWE 18211 card-only n=1).
-   Paid; ask the user first. Paired n=3 only if reads > 0 and a cost claim
-   is wanted. (b) Turn-first misses: measured with
+5. Next: (a) Haiku: declined by the user (2026-10-06); do not run paid
+   Anthropic gates. The breakpoint fix stays unverified on Anthropic.
+   (b) Turn-first misses: measured with
    `scripts/evaluation/turn-boundary-miss.ts`. 24/27 come from the two-turn
    window sliding (older turns dropped), not status relocation, so the miss
    is about one previous turn by design. Any remedy defers retirement on a
