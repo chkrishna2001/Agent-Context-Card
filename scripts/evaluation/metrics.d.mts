@@ -6,6 +6,10 @@ export interface JsonLinesResult {
 }
 
 export function parseJsonLines(text: string): JsonLinesResult;
+export function zeroHotEvidenceAssertion(
+  hotEvidence: unknown,
+  previousMutations?: number,
+): { name: string; pass: boolean; detail: string };
 export function analyzeTrace(text: string, durationMs?: number): any;
 export function analyzeSession(text: string): any;
 export function analyzeSessionFiles(paths: string[]): Promise<any[]>;

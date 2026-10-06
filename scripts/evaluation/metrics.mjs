@@ -82,6 +82,36 @@ function addUsage(target, usage = {}) {
     target.cost[key] += number(usage.cost?.[key]);
 }
 
+// "Zero cross-session evidence leases" assumes the previous turn's evidence
+// was retired by the first projection of this turn. Retirement is driven by
+// observable events (a successful mutation plus a grace round), and the card
+// deliberately does not detect task switches (AGENTS.md, "Task anchors"), so
+// when the previous turn made no successful mutation its reads are still
+// legitimately live. In that case the assertion is relaxed to a pass that
+// records the leases instead of demanding retirement the policy never promised.
+// `previousMutations` is the prior turn's analyzeTrace().mutations, or
+// undefined for the first turn (never relaxed).
+export function zeroHotEvidenceAssertion(hotEvidence, previousMutations) {
+  const leases = JSON.stringify(hotEvidence);
+  if (Array.isArray(hotEvidence) && hotEvidence.length === 0)
+    return {
+      name: "zero cross-session evidence leases",
+      pass: true,
+      detail: leases,
+    };
+  if (previousMutations === 0)
+    return {
+      name: "zero cross-session evidence leases (relaxed: previous turn made no mutation)",
+      pass: true,
+      detail: leases,
+    };
+  return {
+    name: "zero cross-session evidence leases",
+    pass: false,
+    detail: leases,
+  };
+}
+
 export function analyzeTrace(text, durationMs = 0) {
   const { records, errors } = parseJsonLines(text);
   const usage = emptyUsage();
@@ -171,6 +201,7 @@ export function analyzeTrace(text, durationMs = 0) {
     ),
     toolCalls,
     toolErrors,
+    mutations: globalMutationVersion,
     providerErrors,
     duplicateToolCalls: [...toolSignatures.values()].reduce(
       (total, count) => total + Math.max(0, count - 1),

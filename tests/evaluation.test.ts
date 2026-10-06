@@ -9,6 +9,7 @@ import {
   percentChange,
   summarizeAudits,
   summarizeRepeatedRuns,
+  zeroHotEvidenceAssertion,
 } from "../scripts/evaluation/metrics.mjs";
 import {
   sanitizePatch,
@@ -551,5 +552,49 @@ describe("SWE-bench evaluation", () => {
       failToPass: { success: 1, failure: 0 },
       passToPass: { success: 2, failure: 0 },
     });
+  });
+});
+
+describe("zero hot evidence assertion", () => {
+  const lease = [{ path: "counter.mjs", state: "active" }];
+
+  test("passes when no leases remain, regardless of the previous turn", () => {
+    expect(zeroHotEvidenceAssertion([], 3).pass).toBe(true);
+    expect(zeroHotEvidenceAssertion([], undefined).pass).toBe(true);
+  });
+
+  test("fails on live leases when the previous turn mutated or is unknown", () => {
+    expect(zeroHotEvidenceAssertion(lease, 2).pass).toBe(false);
+    expect(zeroHotEvidenceAssertion(lease, undefined).pass).toBe(false);
+    expect(zeroHotEvidenceAssertion(undefined, 2).pass).toBe(false);
+  });
+
+  test("relaxes to a recorded pass when the previous turn made no mutation", () => {
+    const result = zeroHotEvidenceAssertion(lease, 0);
+    expect(result.pass).toBe(true);
+    expect(result.name).toContain("relaxed");
+    expect(result.detail).toContain("counter.mjs");
+  });
+
+  test("analyzeTrace reports successful mutations only", () => {
+    const trace = analyzeTrace(
+      lines([
+        {
+          type: "tool_execution_start",
+          toolCallId: "1",
+          toolName: "edit",
+          args: { path: "a" },
+        },
+        { type: "tool_execution_end", toolCallId: "1", isError: false },
+        {
+          type: "tool_execution_start",
+          toolCallId: "2",
+          toolName: "edit",
+          args: { path: "a" },
+        },
+        { type: "tool_execution_end", toolCallId: "2", isError: true },
+      ]),
+    );
+    expect(trace.mutations).toBe(1);
   });
 });

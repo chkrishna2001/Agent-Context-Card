@@ -86,9 +86,11 @@ plain rg/grep rounds were fully covered by a later read.
 4. Measure prompt-cache effects before claiming savings on caching providers.
 5. Rerun the n=3 gates (`pi-ten-turn-mixed.json`, gemma4:31b and kimi) only
    once a rule with real savings exists.
-6. Decide the `zeroHotEvidence` assertion on unrelated-task turns: relax it
-   when the previous turn had no mutation instead of forcing retirement
-   (task-switch detection was deliberately removed; see `AGENTS.md`).
+6. DONE (2026-10-05): `zeroHotEvidence` relaxed via
+   `zeroHotEvidenceAssertion` in `scripts/evaluation/metrics.mjs`: when the
+   previous turn's trace has `mutations === 0` and leases remain, it records a
+   "relaxed" pass instead of failing; the first turn and mutated turns still
+   fail on live leases. Not yet re-run on a real gate.
 
 ## How to do it
 

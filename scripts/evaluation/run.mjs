@@ -16,6 +16,7 @@ import {
   aggregateTurns,
   analyzeSession,
   analyzeTrace,
+  zeroHotEvidenceAssertion,
   percentChange,
   summarizeAudits,
   summarizeRepeatedRuns,
@@ -213,7 +214,11 @@ const WINDOWS_RESERVED_NAMES = [
 async function captureGitPatch(workspace) {
   const exclude = [];
   let intent;
-  for (let attempt = 0; attempt < WINDOWS_RESERVED_NAMES.length + 1; attempt++) {
+  for (
+    let attempt = 0;
+    attempt < WINDOWS_RESERVED_NAMES.length + 1;
+    attempt++
+  ) {
     intent = await runProcess(
       "git",
       [
@@ -391,6 +396,7 @@ function continuityAssertions(
   snapshots,
   expectedPlanProjectionMode,
   expectedPlanPhaseFramingMode,
+  previousMutations,
 ) {
   const assertions = [];
   if (!expectation) return assertions;
@@ -441,11 +447,8 @@ function continuityAssertions(
       JSON.stringify(taskState),
     );
   if (expectation.zeroHotEvidence)
-    add(
-      "zero cross-session evidence leases",
-      Array.isArray(firstProjection?.hotEvidence) &&
-        firstProjection.hotEvidence.length === 0,
-      JSON.stringify(firstProjection?.hotEvidence),
+    assertions.push(
+      zeroHotEvidenceAssertion(firstProjection?.hotEvidence, previousMutations),
     );
   if (expectation.planRevision !== undefined)
     add(
@@ -808,6 +811,7 @@ async function main() {
                 snapshots,
                 variant.expectPlanProjectionMode,
                 variant.expectPlanPhaseFramingMode,
+                turns.at(-1)?.trace.mutations,
               )
             : [],
         };
