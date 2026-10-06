@@ -197,6 +197,7 @@ export interface RetirementCounts {
   checkpoint: number;
   findingConsumed: number;
   disused: number;
+  superseded: number;
 }
 
 export interface ProjectionResult<TRaw = unknown> {

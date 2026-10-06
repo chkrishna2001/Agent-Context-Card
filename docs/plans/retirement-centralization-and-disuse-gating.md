@@ -1,10 +1,11 @@
 # Retirement without a mutation (centralization, disuse gating, superseded reads)
 
-**Status (2026-10-05): centralization and the disuse mutation gate are done,
-verified, and committed (`0a9e91c`). The next step, "superseded reads"
-(retire an older read once a later read of the same path returned identical
-content), is analyzed and designed but NOT built; the user had not yet said
-"go ahead". Working tree is clean, 163/163 tests pass at `4c441a6`+.**
+**Status (2026-10-05): centralization, the disuse mutation gate (`0a9e91c`),
+and Tier-1 lossless supersession (`supersededRounds`, UNCOMMITTED in the
+working tree) are built and verified: 170/170 tests, tsc/eslint clean, new
+tests fail when the rule is disabled. Real-session replay shows supersession
+frees only ~0.03% of projected chars, so the real remaining weight is bash
+output (see "What's next"). n=3 gates not rerun.**
 
 ## What we're working on
 
@@ -61,26 +62,34 @@ Analysis done this session (replayed on the same 5 CoreApps sessions with
 
 ## What's next
 
-1. Ask the user for the go-ahead on superseded reads (they were asked, no
-   answer yet).
-2. Implement `supersededReads` in `src/core/projection.ts` (see How).
-3. Add regression tests with fault-injection in
-   `tests/projection-overlap.test.ts`.
-4. Replay the real session logs through the real `projectContext` (not the
-   Python approximation) and confirm freed characters roughly match the 25-61%
-   above.
-5. Rerun the n=3 gates and compare: `pi-ten-turn-mixed.json` on
-   `ai-inference-router/gemma4:31b` and `ollama-cloud/kimi-k2.7-code:cloud`.
-6. Decide the `zeroHotEvidence` assertion on unrelated-task turns. It assumes
-   the card knows a new task started; that detection was deliberately removed
-   (`AGENTS.md`, "Task anchors"). Recommended: relax it for turns whose
-   previous turn had no mutation, instead of forcing retirement.
+Replay of 22 CoreApps sessions (`scripts/evaluation/replay-projection.ts`,
+every 10th prefix, real `projectContext`): projected chars 13,971,255 before
+vs 13,966,867 with supersession. Existing rules (2-turn window, mutation
+consumption, in-turn dedupe) already catch what supersession targets. What is
+live in the projection: bash results 63% (`rg -n` ~20%, `cd ... &&` chains
+~6%, `find` ~7%, `git diff/status/show` ~9%, `dotnet build/test` ~5.5%), reads
+36%. Searching for hit-line subsumption by later reads is a dead end: 0 of 17
+plain rg/grep rounds were fully covered by a later read.
 
-Step 4 depends on 2-3; step 5 depends on 4.
+1. Commit the supersession change (rule is correct and harmless; low value).
+2. Decide the next target on bash output. Candidates, each needs a lossless or
+   self-correcting argument: search results retire only after any later read
+   today needs a mutation (`consumedDiscovery`: `hasLater(isMutation)`);
+   `rg | head`, `cd X && cmd` chains and `git` output are not recognized as
+   discovery/read-like, so they are never retired by any rule.
+3. Tier 2 (not started): retirement-regret pinning (a path re-read after
+   retirement is exempt from disuse for the session) before extending disuse
+   to zero-mutation stretches.
+4. Measure prompt-cache effects before claiming savings on caching providers.
+5. Rerun the n=3 gates (`pi-ten-turn-mixed.json`, gemma4:31b and kimi) only
+   once a rule with real savings exists.
+6. Decide the `zeroHotEvidence` assertion on unrelated-task turns: relax it
+   when the previous turn had no mutation instead of forcing retirement
+   (task-switch detection was deliberately removed; see `AGENTS.md`).
 
 ## How to do it
 
-- Add `supersededReads(messages, currentTurnText)` next to `consumedReads` /
+- Built as `supersededRounds(messages, retiredByOthers)` (generalized: any non-mutation tool, text containment, superseder must itself stay live, no current-turn guard because content remains in context); `RetirementCounts.superseded` added. Original sketch: `supersededReads(messages, currentTurnText)` next to `consumedReads` /
   `consumedByFinding` / `consumedByDisuse`; union it into `globalDiscovery` /
   `globalStaleReads` / `globalFindingConsumed` / `globalDisused` in
   `projectContext`, and into the local filter in `projectTurn`'s `candidates`.

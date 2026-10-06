@@ -641,7 +641,9 @@ describe("checkpoint retirement", () => {
       assistant("update_card", [checkpointCall]),
       resultFor(checkpointCall, "Card updated."),
       assistant("mention-a", [mentionA]),
-      resultFor(mentionA, "a-contents"),
+      // Different content, so this fixture exercises disuse/checkpoint
+      // liveness rather than lossless supersession.
+      resultFor(mentionA, "a-changed"),
     ];
 
     const projected = projectContext(messages);
@@ -1064,7 +1066,7 @@ describe("reads via bash", () => {
       assistant("edit-unrelated", [editUnrelated]),
       resultFor(editUnrelated, "ok"),
       assistant("mention-y", [mentionY]),
-      resultFor(mentionY, "y-contents-again"),
+      resultFor(mentionY, "y-different"),
     ];
 
     const projected = projectContext(messages);
@@ -1137,3 +1139,182 @@ interface ToolCall {
   name: string;
   arguments: Record<string, unknown>;
 }
+
+describe("superseded results", () => {
+  const tool = (
+    id: string,
+    name: string,
+    args: Record<string, unknown>,
+  ): ToolCall => ({ id, name, arguments: args });
+  const assistant = (
+    label: string,
+    calls: ToolCall[],
+  ): ContextMessage<string> => ({
+    raw: "tools:" + label,
+    role: "assistant",
+    text: "",
+    toolCalls: calls,
+  });
+  const resultFor = (
+    call: ToolCall,
+    text: string,
+    isError = false,
+  ): ContextMessage<string> => ({
+    raw: "result:" + call.id,
+    role: "toolResult",
+    text,
+    toolCalls: [],
+    toolResult: { callId: call.id, toolName: call.name, isError },
+  });
+  const user = (text: string): ContextMessage<string> => ({
+    raw: "user:" + text,
+    role: "user",
+    text,
+    toolCalls: [],
+  });
+  const done = (text: string): ContextMessage<string> => ({
+    raw: "assistant:" + text,
+    role: "assistant",
+    text,
+    toolCalls: [],
+  });
+  const kept = (messages: ContextMessage<string>[], label: string) =>
+    projectContext(messages)
+      .messages.map((m) => String(m))
+      .includes("tools:" + label);
+
+  test("an older read is dropped when a later read of the same path returned identical content, across turns", () => {
+    const first = tool("1", "read", { path: "src/x.ts" });
+    const second = tool("2", "read", { path: "src/x.ts", offset: 0 });
+    const messages = [
+      user("Review x"),
+      assistant("read-1", [first]),
+      resultFor(first, "x-contents"),
+      done("Looks fine"),
+      user("Re-check x once more"),
+      assistant("read-2", [second]),
+      resultFor(second, "x-contents"),
+    ];
+    const projected = projectContext(messages);
+    const texts = projected.messages.map((m) => String(m));
+    expect(texts.includes("tools:read-1")).toBe(false);
+    expect(texts.includes("tools:read-2")).toBe(true);
+  });
+
+  test("a full read supersedes an earlier partial read it contains", () => {
+    const partial = tool("1", "read", { path: "src/x.ts", limit: 2 });
+    const full = tool("2", "read", { path: "src/x.ts" });
+    const messages = [
+      user("Review x"),
+      assistant("partial", [partial]),
+      resultFor(partial, "line1\nline2"),
+      assistant("full", [full]),
+      resultFor(full, "line1\nline2\nline3"),
+    ];
+    expect(kept(messages, "partial")).toBe(false);
+    expect(kept(messages, "full")).toBe(true);
+  });
+
+  test("different content, different paths, or a later partial read never supersede", () => {
+    const a1 = tool("1", "read", { path: "src/x.ts" });
+    const a2 = tool("2", "read", { path: "src/x.ts", offset: 1 });
+    const other = tool("3", "read", { path: "src/y.ts" });
+    const changed = [
+      user("Review"),
+      assistant("a1", [a1]),
+      resultFor(a1, "version-one"),
+      assistant("a2", [a2]),
+      resultFor(a2, "version-two"),
+    ];
+    expect(kept(changed, "a1")).toBe(true);
+
+    const otherPath = [
+      user("Review"),
+      assistant("a1", [a1]),
+      resultFor(a1, "same"),
+      assistant("other", [other]),
+      resultFor(other, "same"),
+    ];
+    expect(kept(otherPath, "a1")).toBe(true);
+
+    const laterPartial = [
+      user("Review"),
+      assistant("a1", [a1]),
+      resultFor(a1, "line1\nline2\nline3"),
+      assistant("a2", [a2]),
+      resultFor(a2, "line1"),
+    ];
+    expect(kept(laterPartial, "a1")).toBe(true);
+  });
+
+  test("a failed later read, empty results, and mutations never supersede or get superseded", () => {
+    const a1 = tool("1", "read", { path: "src/x.ts" });
+    const failed = tool("2", "read", { path: "src/x.ts", offset: 1 });
+    const failedCase = [
+      user("Review"),
+      assistant("a1", [a1]),
+      resultFor(a1, "contents"),
+      assistant("failed", [failed]),
+      resultFor(failed, "contents", true),
+    ];
+    expect(kept(failedCase, "a1")).toBe(true);
+
+    const e1 = tool("3", "edit", { path: "src/x.ts", n: 1 });
+    const e2 = tool("4", "edit", { path: "src/x.ts", n: 2 });
+    const edits = [
+      user("Edit"),
+      assistant("e1", [e1]),
+      resultFor(e1, "ok"),
+      assistant("e2", [e2]),
+      resultFor(e2, "ok"),
+    ];
+    expect(kept(edits, "e1")).toBe(true);
+  });
+
+  test("a round is superseded only if every call in it is covered", () => {
+    const x1 = tool("1", "read", { path: "src/x.ts" });
+    const y1 = tool("2", "read", { path: "src/y.ts" });
+    const x2 = tool("3", "read", { path: "src/x.ts" });
+    const messages = [
+      user("Review"),
+      assistant("pair", [x1, y1]),
+      resultFor(x1, "x"),
+      resultFor(y1, "y"),
+      assistant("x-again", [x2]),
+      resultFor(x2, "x"),
+    ];
+    expect(kept(messages, "pair")).toBe(true);
+  });
+
+  test("a non-read call is superseded by the same call with output containing the earlier output", () => {
+    const run1 = tool("1", "bash", { command: "npm test" });
+    const run2 = tool("2", "bash", { command: "npm test" });
+    const other = tool("3", "bash", { command: "npm run lint" });
+    const messages = [
+      user("Validate"),
+      assistant("test-1", [run1]),
+      resultFor(run1, "6 passed"),
+      assistant("lint", [other]),
+      resultFor(other, "6 passed"),
+      done("All green"),
+      user("Validate again"),
+      assistant("test-2", [run2]),
+      resultFor(run2, "6 passed"),
+    ];
+    expect(kept(messages, "test-1")).toBe(false);
+    expect(kept(messages, "test-2")).toBe(true);
+  });
+
+  test("a chain of identical reads keeps exactly the newest", () => {
+    const calls = [1, 2, 3].map((n) =>
+      tool(String(n), "read", { path: "src/x.ts", offset: n }),
+    );
+    const messages: ContextMessage<string>[] = [user("Review")];
+    for (const call of calls) {
+      messages.push(assistant("r" + call.id, [call]), resultFor(call, "same"));
+    }
+    expect(kept(messages, "r1")).toBe(false);
+    expect(kept(messages, "r2")).toBe(false);
+    expect(kept(messages, "r3")).toBe(true);
+  });
+});

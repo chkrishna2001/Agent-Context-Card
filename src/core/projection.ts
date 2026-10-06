@@ -413,6 +413,69 @@ function consumedByDisuse<TRaw>(
   return withCurrentTurnGuard(consumed, allRounds, currentTurnText);
 }
 
+// Lossless redundancy: a round whose every call is a successful,
+// non-mutating call whose result text is wholly contained in the result of a
+// LATER successful call of the same kind (same path for reads, same tool and
+// arguments otherwise). Unlike every rule above this predicts nothing about
+// future need - the later copy carries everything the earlier one did, so
+// dropping the earlier one cannot remove information. Text containment (not
+// just equality) lets a full-file read supersede an earlier partial read.
+// Whole rounds only, so tool-call/result pairing is preserved.
+//
+// `retiredByOthers` is every round another rule already retires. A superseder
+// must itself stay live, otherwise both copies would vanish; walking from the
+// newest round backwards means a chain A<B<C is judged against C's final
+// liveness, not B's intermediate state. Not wrapped in withCurrentTurnGuard:
+// that guard protects against dropping evidence the user's request needs, and
+// here the identical content stays in context regardless.
+function supersededRounds<TRaw>(
+  messages: ContextMessage<TRaw>[],
+  retiredByOthers: Set<number>,
+): Set<number> {
+  const results = resultMap(messages);
+  const allRounds = rounds(messages);
+  const superseded = new Set<number>();
+  const supersedeKey = (call: ToolCall): string => {
+    const path = readPath(call);
+    return path !== undefined ? `read:${path}` : `call:${fingerprint([call])}`;
+  };
+  const textOf = (call: ToolCall): string =>
+    (results.get(call.id)?.text ?? "").trim();
+
+  for (let i = allRounds.length - 1; i >= 0; i--) {
+    const round = allRounds[i];
+    if (!round || retiredByOthers.has(round.index)) continue;
+    const eligible = round.calls.every(
+      (call) =>
+        !isMutation(call) &&
+        !isUpdateCardCall(call) &&
+        successful(call, results) &&
+        textOf(call) !== "",
+    );
+    if (!eligible) continue;
+
+    const allCovered = round.calls.every((call) => {
+      const key = supersedeKey(call);
+      const text = textOf(call);
+      return allRounds
+        .slice(i + 1)
+        .some(
+          (later) =>
+            !retiredByOthers.has(later.index) &&
+            !superseded.has(later.index) &&
+            later.calls.some(
+              (candidate) =>
+                successful(candidate, results) &&
+                supersedeKey(candidate) === key &&
+                textOf(candidate).includes(text),
+            ),
+        );
+    });
+    if (allCovered) superseded.add(round.index);
+  }
+  return superseded;
+}
+
 function fingerprint(calls: ToolCall[]): string {
   return JSON.stringify(
     calls.map((call) => ({ name: call.name, arguments: call.arguments })),
@@ -595,6 +658,7 @@ function projectionDetails<TRaw>(
   checkpointIndex: number | undefined = undefined,
   findingConsumedIndices: Set<number> = new Set(),
   disusedIndices: Set<number> = new Set(),
+  supersededIndices: Set<number> = new Set(),
 ): { retired: RetirementCounts; hotEvidence: EvidenceLease[] } {
   const keptIds = new Set(
     projected.flatMap(
@@ -615,6 +679,7 @@ function projectionDetails<TRaw>(
     checkpoint: 0,
     findingConsumed: 0,
     disused: 0,
+    superseded: 0,
   };
 
   for (const [index, message] of original.entries()) {
@@ -625,6 +690,8 @@ function projectionDetails<TRaw>(
     if (calls.some((call) => keptIds.has(call.id))) continue;
     if (checkedInSameRound(calls, keptFingerprints)) {
       retired.duplicate++;
+    } else if (supersededIndices.has(index)) {
+      retired.superseded++;
     } else if (calls.every(isDiscovery)) {
       retired.discovery++;
     } else if (calls.some(isReadLike)) {
@@ -738,6 +805,7 @@ export function projectContext<TRaw>(
         checkpoint: 0,
         findingConsumed: 0,
         disused: 0,
+        superseded: 0,
       },
       hotEvidence: [],
     };
@@ -750,14 +818,19 @@ export function projectContext<TRaw>(
   const globalStaleReads = consumedReads(messages, currentTurnText);
   const globalFindingConsumed = consumedByFinding(messages, currentTurnText);
   const globalDisused = consumedByDisuse(messages, currentTurnText);
+  const retiredByOthers = new Set([
+    ...globalDiscovery,
+    ...globalStaleReads,
+    ...globalFindingConsumed,
+    ...globalDisused,
+  ]);
+  const globalSuperseded = supersededRounds(messages, retiredByOthers);
   const activeRounds = new Set<number>();
   const retiredRounds = new Set<number>();
   for (const round of rounds(messages)) {
     if (
-      !globalDiscovery.has(round.index) &&
-      !globalStaleReads.has(round.index) &&
-      !globalFindingConsumed.has(round.index) &&
-      !globalDisused.has(round.index)
+      !retiredByOthers.has(round.index) &&
+      !globalSuperseded.has(round.index)
     ) {
       activeRounds.add(round.index);
     } else {
@@ -830,6 +903,7 @@ export function projectContext<TRaw>(
     checkpointRoundIndexGlobal,
     globalFindingConsumed,
     globalDisused,
+    globalSuperseded,
   );
   return {
     messages: projected.map((message) => message.raw),
