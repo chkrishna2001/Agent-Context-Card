@@ -71,13 +71,16 @@ live in the projection: bash results 63% (`rg -n` ~20%, `cd ... &&` chains
 36%. Searching for hit-line subsumption by later reads is a dead end: 0 of 17
 plain rg/grep rounds were fully covered by a later read.
 
-1. Commit the supersession change (rule is correct and harmless; low value).
-2. Decide the next target on bash output. Candidates, each needs a lossless or
-   self-correcting argument: search results retire only after any later read
-   today needs a mutation (`consumedDiscovery`: `hasLater(isMutation)`);
-   `rg | head`, `cd X && cmd` chains and `git` output are not recognized as
-   discovery/read-like, so they are never retired by any rule.
-3. Tier 2 (not started): retirement-regret pinning (a path re-read after
+1. Supersession committed (`b95c83f`).
+2. Bash output investigated, no rule found (2026-10-05, same 22 sessions,
+   95 rg/grep rounds): path-level "all hit files read later" covers 4 rounds
+   (~9k of ~950k chars); hit files mentioned/read again later cover 88% of
+   search chars, truly unused only 12% (5% of that already after a mutation,
+   so existing rules take it). Search output is working evidence, not waste.
+   `cd X && cmd` chains are already matched by `isDiscovery`/`readPath` regexes
+   where applicable. Do not build search retirement without new evidence; the
+   deterministic safe floor on these sessions is probably near where it is.
+3. Tier 2, now low priority given item 2 (not started): retirement-regret pinning (a path re-read after
    retirement is exempt from disuse for the session) before extending disuse
    to zero-mutation stretches.
 4. Measure prompt-cache effects before claiming savings on caching providers.
