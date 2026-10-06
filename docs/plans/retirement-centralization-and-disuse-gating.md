@@ -1,11 +1,13 @@
 # Retirement without a mutation (centralization, disuse gating, superseded reads)
 
-**Status (2026-10-05): centralization, the disuse mutation gate (`0a9e91c`),
-and Tier-1 lossless supersession (`supersededRounds`, UNCOMMITTED in the
-working tree) are built and verified: 170/170 tests, tsc/eslint clean, new
-tests fail when the rule is disabled. Real-session replay shows supersession
-frees only ~0.03% of projected chars, so the real remaining weight is bash
-output (see "What's next"). n=3 gates not rerun.**
+**Status (2026-10-05, later): retirement work is committed (`b95c83f`,
+`d2a67a9`). The prompt-cache effect is now measured
+(`docs/notes/prompt-cache-effect-2026-10-05.md`, script
+`scripts/evaluation/cache-effect.mjs`): on every caching provider the card
+lowers raw input but raises uncached input; on ten-turn gates at cached
+price 0.1 it costs +35% to +135% more than baseline (gpt-5-nano is the
+exception), and on Haiku it never reads cache. The top priority is now cache
+stability, not more retirement.**
 
 ## What we're working on
 
@@ -83,9 +85,20 @@ plain rg/grep rounds were fully covered by a later read.
 3. Tier 2, now low priority given item 2 (not started): retirement-regret pinning (a path re-read after
    retirement is exempt from disuse for the session) before extending disuse
    to zero-mutation stretches.
-4. Measure prompt-cache effects before claiming savings on caching providers.
-5. Rerun the n=3 gates (`pi-ten-turn-mixed.json`, gemma4:31b and kimi) only
-   once a rule with real savings exists.
+4. DONE (2026-10-05): prompt-cache effect measured, see note above. Two
+   causes: (a) the position-0 card header changes every user turn
+   (`LATEST REQUEST`, repo HEAD), which accounts for 63-86% of the card's extra
+   uncached input on kimi/gemma/mycoder; (b) on Anthropic, Pi's single
+   `cache_control` breakpoint lands on the trailing status block, so nothing
+   is ever read back. Next, as one A/B-gated change with cache telemetry:
+   move `LATEST REQUEST`/HEAD out of the header into the per-turn tail; keep
+   the status block fixed within a turn; pin retirement to turn boundaries.
+   Gate correctness first (header placement may affect stale-plan dominance),
+   then compare `cache-effect.mjs` effective cost on kimi (ten-turn n=3) and,
+   if budget allows, Haiku.
+5. Rerun the n=3 gates (`pi-ten-turn-mixed.json`, gemma4:31b and kimi) after
+   the cache-stability change in item 4; always report `cache-effect.mjs`
+   output next to raw input.
 6. DONE (2026-10-05): `zeroHotEvidence` relaxed via
    `zeroHotEvidenceAssertion` in `scripts/evaluation/metrics.mjs`: when the
    previous turn's trace has `mutations === 0` and leases remain, it records a
@@ -94,18 +107,8 @@ plain rg/grep rounds were fully covered by a later read.
 
 ## How to do it
 
-- Built as `supersededRounds(messages, retiredByOthers)` (generalized: any non-mutation tool, text containment, superseder must itself stay live, no current-turn guard because content remains in context); `RetirementCounts.superseded` added. Original sketch: `supersededReads(messages, currentTurnText)` next to `consumedReads` /
-  `consumedByFinding` / `consumedByDisuse`; union it into `globalDiscovery` /
-  `globalStaleReads` / `globalFindingConsumed` / `globalDisused` in
-  `projectContext`, and into the local filter in `projectTurn`'s `candidates`.
-- Rule: a round is superseded only if it has reads and EVERY call in it is a
-  successful read (`isReadLike`) whose path has a later successful read with the
-  same result `text` hash (reuse the sha256 already used for `EvidenceLease.version`
-  in `projectionDetails`). Whole rounds only, so tool-call/result pairing is
-  preserved. Wrap with `withCurrentTurnGuard`.
-- Add a `superseded` counter to `RetirementCounts` in `src/core/types.ts` and
-  the zeroed literals in `projectContext` / `projectionDetails`; update tests
-  that assert exact count structs.
+- Supersession is built (`supersededRounds` in `src/core/projection.ts`, `b95c83f`);
+  read the code, not an old sketch.
 - Run: `bun test`, `bun x tsc --noEmit`, `bun x eslint .`, `bun x prettier
   --check src/core tests`, `bun build index.ts --outdir dist --target node`.
   Do not run `prettier --write .`; ~90 unrelated files report warnings.

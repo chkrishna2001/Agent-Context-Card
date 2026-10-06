@@ -2,8 +2,8 @@
 
 **Status (2026-09-27): the 2026-09-15/16 threads (#1, #4-#7) are done,
 committed, and pushed. The 2026-09-16 Haiku cache-cost mystery (thread #5)
-is still open and untouched this session — read
-`docs/notes/haiku-cache-defeat-2026-09-16.md` before touching anything
+was resolved 2026-10-05 — read
+`docs/notes/prompt-cache-effect-2026-10-05.md` before touching anything
 cache-related. This session (2026-09-27) reworked the repeat-detection
 mechanism itself (threads #2/#3 below are rewritten, not just extended —
 the old "capped success cache" no longer exists at all), fixed two real
@@ -180,11 +180,10 @@ being trusted.
 
 ## What's next
 
-1. **Thread #5 (Haiku cache-cost mystery) — still open, untouched this
-   session.** See `docs/notes/haiku-cache-defeat-2026-09-16.md`. Every
-   client-side theory has been checked and ruled out; next step needs
-   either a token-level payload diff nobody's found yet, or Anthropic-side
-   account visibility this codebase can't produce.
+1. **Thread #5 (Haiku cache-cost mystery) — resolved 2026-10-05.** The
+   cache breakpoint lands on the volatile status block; see
+   `docs/notes/prompt-cache-effect-2026-10-05.md`. Fix work is tracked in
+   `docs/plans/retirement-centralization-and-disuse-gating.md`.
 2. **The Laya staleness-signal research — deferred again, not started.**
    The open problem: `consumedByDisuse` is gated off until a mutation lands
    because a controlled 155-read evaluation found its accuracy collapses to

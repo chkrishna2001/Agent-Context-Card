@@ -1,5 +1,9 @@
 # Working notes — 2026-09-16: the Haiku caching investigation
 
+**Resolved 2026-10-05:** Pi's single message cache breakpoint lands on the
+card's volatile trailing status block, so no later request can match a prior
+breakpoint. See `prompt-cache-effect-2026-10-05.md`.
+
 Continues the "consistent 50-60% token savings" campaign from
 `docs/plans/repeat-detection-and-eval-harness-followups.md`. That plan's
 first four steps (bash/grep near-duplicate detection, evidence-ledger

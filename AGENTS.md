@@ -546,6 +546,20 @@ The evidence supports:
 
 This is a strong proof of concept.
 
+## Prompt-cache effect
+
+Raw provider-input savings are not cost savings on caching providers. A
+2026-10-05 re-pricing of existing paired reports
+(`scripts/evaluation/cache-effect.mjs`,
+`docs/notes/prompt-cache-effect-2026-10-05.md`) found the card lowers raw input
+but raises uncached input everywhere. With cached tokens at 0.1× price, the
+ten-turn n=3 medians were +45.5% (kimi), +63.4% (router gemma4), and +50.7%
+(mycoder) effective cost versus baseline. On Claude Haiku the card read
+essentially no cache (+530% median). Two causes: the position-0 card header
+changes every user turn (`LATEST REQUEST`, repo HEAD), and Pi's single Anthropic
+cache breakpoint lands on the volatile trailing status block. Always report
+cache hit rate and effective cost next to provider input.
+
 ## What is not proved
 
 Do not call the package production-ready yet. The evidence does not establish:
