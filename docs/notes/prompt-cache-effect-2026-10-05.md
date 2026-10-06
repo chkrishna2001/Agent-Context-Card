@@ -130,3 +130,22 @@ two-turn window. Cutting it means deferring retirement of the previous turn
 past the boundary, which is a cost threshold (see AGENTS.md on fixed budgets).
 On short-turn sessions at a 0.1 cached price, this is the true cost of
 retirement. Report it as such rather than tuning the fixture.
+
+### Second model: glm-5.3 ten-turn n=3 (2026-10-06)
+
+`ollama-cloud/glm-5.3` (`glm53-cache-stable-n3`, after the cache-stable change;
+no pre-change run exists for this model). `glm-5.1:cloud` and
+`deepseek-v4-flash:cloud` in `~/.pi/agent/models.json` were retired by Ollama
+Cloud on 2026-09-25 (HTTP 410); `glm-5.3` was added there as a copy of the
+glm-5.1 entry.
+
+- Correctness: `npm test` and file assertions 6/6. Card-r3 has one
+  `zeroHotEvidence` FAIL at turn 3, again a `consumed` lease.
+- Hit rate 92–93% baseline vs 76–78% card. Raw input median -23.0%;
+  effective cost median **+35.1%** at 0.1 and +3.5% at 0.25.
+- Card behaved worse on this model: medians 36 vs 28 requests, 32 vs 27 tools,
+  9,991 vs 6,485 output tokens, 157 s vs 113 s; card-r1 had 5 tool errors
+  (baseline 0 in all runs).
+- Turn-first misses: 24 of 27 boundaries change at the first history message
+  (window slide, 99.2k chars); 3 status-only at turn 2 (18.1k chars). Same
+  structure as kimi.

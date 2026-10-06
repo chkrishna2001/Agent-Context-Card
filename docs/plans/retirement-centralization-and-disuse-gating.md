@@ -101,7 +101,11 @@ plain rg/grep rounds were fully covered by a later read.
    tokens and change what the model sees; test with an A/B gate before
    changing. (c) Check
    whether `zeroHotEvidenceAssertion` should count `consumed` leases (the
-   kimi card-r3 turn-9 FAIL is a consumed lease).
+   kimi card-r3 turn-9 and glm-5.3 card-r3 turn-3 FAILs are both consumed
+   leases). (d) glm-5.3 n=3 done: correctness intact, effective +35% at 0.1,
+   but card used more requests/tools/output/time than baseline on that model;
+   investigate before citing glm-5.3 efficiency. Only kimi-k2.7-code and
+   glm-5.3 are live Ollama Cloud models in the Pi config.
 6. DONE (2026-10-05): `zeroHotEvidence` relaxed via
    `zeroHotEvidenceAssertion` in `scripts/evaluation/metrics.mjs`: when the
    previous turn's trace has `mutations === 0` and leases remain, it records a
