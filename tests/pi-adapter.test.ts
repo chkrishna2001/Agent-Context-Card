@@ -15,6 +15,7 @@ import {
   CARD_MESSAGE_TYPE,
   CARD_NUDGE_MESSAGE_TYPE,
   CARD_STATE_ENTRY_TYPE,
+  STATUS_MESSAGE_TYPE,
   TASK_STATE_AUDIT_ENTRY_TYPE,
 } from "../src/core/types";
 import { scopeMessagesToGoal } from "../src/pi/normalize";
@@ -1784,9 +1785,13 @@ describe("Pi adapter", () => {
           timestamp: 2,
         },
       ] as AgentMessage[]);
-      // Pending/findings are volatile, so they render in the trailing
-      // status message, not the leading (cacheable) card message.
-      const status = JSON.stringify(output?.messages.at(-1));
+      // Pending/findings are volatile, so they render in the status
+      // message, not the leading (cacheable) card message.
+      const status = JSON.stringify(
+        output?.messages.find(
+          (message: any) => message.customType === STATUS_MESSAGE_TYPE,
+        ),
+      );
       expect(status).toContain("what's pending: verify rebuild; rerun smoke");
       expect(status).toContain(
         "findings: schema: no caps allowed; scope: repo always present",
@@ -1936,9 +1941,13 @@ describe("Pi adapter", () => {
           timestamp: 6,
         },
       ] as AgentMessage[]);
-      // filesRead is volatile, so it renders in the trailing status
-      // message, not the leading (cacheable) card message.
-      const status = JSON.stringify(output?.messages.at(-1));
+      // filesRead is volatile, so it renders in the status message, not
+      // the leading (cacheable) card message.
+      const status = JSON.stringify(
+        output?.messages.find(
+          (message: any) => message.customType === STATUS_MESSAGE_TYPE,
+        ),
+      );
       // The read is now consumed by the later write on the same path, so
       // it's the one case where the card is expected to mention it.
       expect(status).toMatch(/files read: .+ \(consumed\)/);
@@ -1978,5 +1987,80 @@ describe("Pi adapter", () => {
       await rm(cwd, { recursive: true, force: true });
       await rm(cardsDir, { recursive: true, force: true });
     }
+  });
+  test("requests within one user turn extend the previous request byte for byte", async () => {
+    const extension = harness();
+    await extension.start();
+    const request: AgentMessage = {
+      role: "user",
+      content: "Inspect src/a.ts",
+      timestamp: 1,
+    };
+    const first = [request, ...readSeed("r1", "src/a.ts", "v1")];
+    const second = [...first, ...readSeed("r2", "src/a.ts", "v1")];
+    const firstOut = await extension.project(first);
+    const secondOut = await extension.project(second);
+    // A fresh projection collapses the repeated read to its newest round;
+    // that retirement must wait for the next user turn so the provider's
+    // prefix cache can read the first request back.
+    const firstWire = firstOut!.messages.map((m) => JSON.stringify(m));
+    const secondWire = secondOut!.messages.map((m) => JSON.stringify(m));
+    expect(secondWire.slice(0, firstWire.length)).toEqual(firstWire);
+    expect(secondWire.length).toBe(firstWire.length + 2);
+    expect((extension.entries.at(-1)?.data as any).turnPinned).toBe(true);
+    // Fresh hotEvidence still drives the repeat gate inside the pinned turn.
+    expect((extension.entries.at(-1)?.data as any).hotEvidence).toHaveLength(1);
+
+    const next = [
+      ...second,
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "a.ts is fine" }],
+        stopReason: "stop",
+        timestamp: 6,
+      } as AgentMessage,
+      { role: "user", content: "Now check src/b.ts", timestamp: 7 },
+    ] as AgentMessage[];
+    const nextOut = await extension.project(next);
+    expect((extension.entries.at(-1)?.data as any).turnPinned).toBe(false);
+    expect(nextOut!.messages.length).toBeLessThan(
+      secondOut!.messages.length + 2,
+    );
+  });
+
+  test("the card header stays byte-identical across user turns and the status follows the latest request", async () => {
+    const extension = harness();
+    await extension.start();
+    const turn1: AgentMessage[] = [
+      { role: "user", content: "Inspect the project", timestamp: 1 },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Done." }],
+        stopReason: "stop",
+        timestamp: 2,
+      } as AgentMessage,
+    ];
+    const out1 = await extension.project(turn1);
+    const turn2 = [
+      ...turn1,
+      { role: "user", content: "Now document it", timestamp: 3 },
+      ...readSeed("r1", "README.md"),
+    ] as AgentMessage[];
+    const out2 = await extension.project(turn2);
+    expect(JSON.stringify((out2!.messages[0] as any).content)).toBe(
+      JSON.stringify((out1!.messages[0] as any).content),
+    );
+    expect(JSON.stringify(out2!.messages[0])).not.toContain("LATEST REQUEST");
+    const statusIndex = out2!.messages.findIndex(
+      (message: any) => message.customType === STATUS_MESSAGE_TYPE,
+    );
+    expect(out2!.messages[statusIndex - 1]).toMatchObject({
+      role: "user",
+      content: "Now document it",
+    });
+    expect(JSON.stringify(out2!.messages[statusIndex])).toContain(
+      "LATEST REQUEST: Now document it",
+    );
+    expect(statusIndex).toBe(out2!.messages.length - 3);
   });
 });

@@ -226,6 +226,9 @@ export interface ProjectionAudit {
   retiredMessages: number;
   retiredTurns: number;
   retired: RetirementCounts;
+  // True when this request resent the turn's first projection plus the raw
+  // messages added since, instead of a fresh projection.
+  turnPinned?: boolean;
   hotEvidence: EvidenceLease[];
   retiredProcessNotes?: string;
   invariantViolations?: import("./invariants").InvariantViolation[];

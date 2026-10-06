@@ -1,13 +1,11 @@
 # Retirement without a mutation (centralization, disuse gating, superseded reads)
 
-**Status (2026-10-05, later): retirement work is committed (`b95c83f`,
-`d2a67a9`). The prompt-cache effect is now measured
-(`docs/notes/prompt-cache-effect-2026-10-05.md`, script
-`scripts/evaluation/cache-effect.mjs`): on every caching provider the card
-lowers raw input but raises uncached input; on ten-turn gates at cached
-price 0.1 it costs +35% to +135% more than baseline (gpt-5-nano is the
-exception), and on Haiku it never reads cache. The top priority is now cache
-stability, not more retirement.**
+**Status (2026-10-06): the cache-stability change (item 4) is built and
+gated on kimi ten-turn n=3: within-turn caching is fixed (later-request
+uncached input -42%, near baseline), but turn-first misses from boundary
+retirement are unchanged, so kimi effective cost is still ~+50% vs baseline.
+Haiku (the case the breakpoint fix targets) is not yet run. See the
+2026-10-06 section of `docs/notes/prompt-cache-effect-2026-10-05.md`.**
 
 ## What we're working on
 
@@ -85,20 +83,17 @@ plain rg/grep rounds were fully covered by a later read.
 3. Tier 2, now low priority given item 2 (not started): retirement-regret pinning (a path re-read after
    retirement is exempt from disuse for the session) before extending disuse
    to zero-mutation stretches.
-4. DONE (2026-10-05): prompt-cache effect measured, see note above. Two
-   causes: (a) the position-0 card header changes every user turn
-   (`LATEST REQUEST`, repo HEAD), which accounts for 63-86% of the card's extra
-   uncached input on kimi/gemma/mycoder; (b) on Anthropic, Pi's single
-   `cache_control` breakpoint lands on the trailing status block, so nothing
-   is ever read back. Next, as one A/B-gated change with cache telemetry:
-   move `LATEST REQUEST`/HEAD out of the header into the per-turn tail; keep
-   the status block fixed within a turn; pin retirement to turn boundaries.
-   Gate correctness first (header placement may affect stale-plan dominance),
-   then compare `cache-effect.mjs` effective cost on kimi (ten-turn n=3) and,
-   if budget allows, Haiku.
-5. Rerun the n=3 gates (`pi-ten-turn-mixed.json`, gemma4:31b and kimi) after
-   the cache-stability change in item 4; always report `cache-effect.mjs`
-   output next to raw input.
+4. DONE (2026-10-06): cache-stable card. `LATEST REQUEST`/HEAD moved into
+   the status block, status placed right after the turn's user request, and
+   card/status/history pinned per user turn (`turnPinned` in the audit).
+   kimi n=3: correctness intact, effective cost unchanged (+50.8% median).
+   The remaining cost is one miss per turn from boundary retirement.
+5. Next: (a) Haiku gate to confirm the breakpoint fix yields cache reads
+   (costs money; ask first); (b) the per-turn miss. Candidates: keep earlier
+   turns' status blocks in history so only real retirement moves the prefix;
+   or retire at a boundary only when it frees more than it forces to
+   recompute (check against the no-fixed-budget rule in AGENTS.md first).
+   Then rerun gemma4:31b ten-turn n=3 and report `cache-effect.mjs` output.
 6. DONE (2026-10-05): `zeroHotEvidence` relaxed via
    `zeroHotEvidenceAssertion` in `scripts/evaluation/metrics.mjs`: when the
    previous turn's trace has `mutations === 0` and leases remain, it records a

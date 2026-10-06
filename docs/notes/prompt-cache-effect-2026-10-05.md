@@ -81,3 +81,33 @@ message) did not touch the breakpoint position, which is why neither helped.
      Haiku note). On Anthropic this is required for any cache read at all.
   3. Expect one cache miss per turn from completed-turn retirement even after
      1 and 2; whether retirement savings beat that is the measurement to rerun.
+
+## Fixes 1 and 2 applied (2026-10-06)
+
+Built as one change (`src/core/format.ts`, `src/pi/index.ts`): `LATEST
+REQUEST` and repo HEAD moved from the card into the status block; the status
+block sits right after the turn's user request instead of at the tail; the
+card, status and projected history are pinned at the first request of each
+user turn, and later requests resend the pin plus the raw messages added since
+(audit `turnPinned`). Retirement and card changes wait for the next user turn.
+The fresh projection still drives `hotEvidence` and the repeat gate.
+
+kimi ten-turn n=3 (`kimi-cache-stable-n3`): `npm test` and file assertions
+6/6; card-r3 has one `zeroHotEvidence` FAIL at turn 9 (a consumed lease from
+the fresh projection, same class as the old gate's 3 FAILs).
+
+| Card, summed over 3 runs | Turn-first uncached | Later uncached | Hit rate | Effective Δ median (0.1) |
+| ------------------------ | ------------------: | -------------: | -------- | -----------------------: |
+| before (`kimi-gate-n3`)  |              24,692 |         22,062 | 65–76%   |                   +45.5% |
+| after                    |              23,250 |         12,898 | 77–79%   |                   +50.8% |
+| baseline (after run)     |               4,345 |         10,316 | 91–95%   |                        — |
+
+Within-turn caching is fixed: later requests read the whole prior prompt and
+miss only the new tool rounds, near baseline. Turn-first misses did not move,
+so header churn was not their main cause on kimi. At each turn boundary,
+retirement changes the history right after the first collapsed message; the
+provider recomputes everything behind it. On this small fixture the prompt
+drops from ~3.8k to ~1.9k at a turn boundary while only ~1.3k is read from
+cache, so the per-turn miss outweighs what retirement saves at a 0.1 cached
+price. Net cost on kimi is unchanged within noise. Untested: Anthropic, where
+the breakpoint placement (cause 2) should now allow cache reads at all.

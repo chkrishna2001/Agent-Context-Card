@@ -5,7 +5,6 @@ import type {
   PlanPhaseFramingState,
   PlanProjectionMode,
   PlanProjectionState,
-  RepositoryIdentity,
   RuntimeCard,
 } from "./types";
 
@@ -86,11 +85,6 @@ function formatProject(card: RuntimeCard): string | undefined {
   return undefined;
 }
 
-function formatRepo(repo: RepositoryIdentity): string {
-  const head = repo.head ? repo.head.slice(0, 8) : undefined;
-  return head ? `${repo.root} @ ${head}` : repo.root;
-}
-
 function projectCapabilitiesSection(card: RuntimeCard): string[] {
   const rows: string[] = [];
   const type = card.capabilities.projectType
@@ -113,6 +107,10 @@ function projectCapabilitiesSection(card: RuntimeCard): string[] {
   return rows;
 }
 
+// The card is the provider prefix's first message, so any byte that changes
+// here invalidates every cached token behind it. Keep it fixed for the task:
+// per-turn values (latest request, repository HEAD) belong in
+// formatCardStatus, never here.
 export function formatContextCard(
   card: RuntimeCard,
   options: FormatContextCardOptions = {},
@@ -120,12 +118,10 @@ export function formatContextCard(
   const lines = ["<context-card>"];
   if (card.goal) lines.push(`goal: ${card.goal}`);
   if (card.taskId) lines.push(`TASK ID: ${card.taskId}`);
-  if (card.latestRequest && card.latestRequest !== card.goal)
-    lines.push(`LATEST REQUEST: ${card.latestRequest}`);
 
   const project = formatProject(card);
   if (project) lines.push(`project: ${project}`);
-  if (card.repo) lines.push(`repo: ${formatRepo(card.repo)}`);
+  if (card.repo) lines.push(`repo: ${card.repo.root}`);
 
   if (card.plan) {
     if (planProjectionState(card, options) === "retired")
@@ -164,16 +160,19 @@ export function formatContextCard(
   return lines.join("\n");
 }
 
-// Everything here changes on nearly every tool round: execution changes,
-// pending items, findings, file-read leases, failures, resumed facts. The
-// header above (goal, plan, capabilities) stays essentially fixed for the
-// whole task, so callers should place this as a separate trailing message
-// after the projected conversation rather than folding it into the leading
-// card - that keeps the large stable history a valid, ever-growing
-// cacheable provider prefix, and only this small block needs reprocessing
-// when it changes.
+// Everything here changes between turns: latest request, repository HEAD,
+// execution changes, pending items, findings, file-read leases, failures,
+// resumed facts. The header above (goal, plan, capabilities) stays fixed for
+// the whole task, so callers place this as a separate message right after the
+// turn's user request and keep it unchanged until the next request - that
+// keeps the history before it a valid cacheable prefix, and lets every later
+// request in the turn extend that prefix instead of replacing its tail.
 export function formatCardStatus(card: RuntimeCard): string {
   const lines: string[] = [];
+
+  if (card.latestRequest && card.latestRequest !== card.goal)
+    lines.push(`LATEST REQUEST: ${card.latestRequest}`);
+  if (card.repo?.head) lines.push(`repo HEAD: ${card.repo.head.slice(0, 8)}`);
 
   if (card.execution.changes.length) {
     lines.push(

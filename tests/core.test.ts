@@ -256,8 +256,11 @@ describe("card extraction", () => {
     expect(card).toContain("TASK ID: JIRA-123");
     expect(card).toContain("project: Deterministic context projection");
     expect(card).toContain(
-      "repo: C:/Users/chkri/source/repos/agent-context-card @ abcdef01",
+      "repo: C:/Users/chkri/source/repos/agent-context-card\n",
     );
+    // HEAD moves between turns, so it renders in the status block; the card
+    // must stay byte-stable for the whole task.
+    expect(card).not.toContain("abcdef01");
     const goalIdx = card.indexOf("goal:");
     const taskIdIdx = card.indexOf("TASK ID:");
     const projectIdx = card.indexOf("project:");
@@ -270,6 +273,7 @@ describe("card extraction", () => {
     // separately so their churn doesn't invalidate a provider's prefix
     // cache for the stable card above.
     const status = formatCardStatus(runtimeCard);
+    expect(status).toContain("repo HEAD: abcdef01");
     expect(status).toContain(
       "what happened: edit source.ts; shell_command bun test ×2",
     );

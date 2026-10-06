@@ -213,6 +213,32 @@ function branchMessages(entries: SessionEntry[]): AgentMessage[] {
     .flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
 }
 
+interface TurnPin {
+  key: number;
+  sourceLength: number;
+  first: string;
+  boundary: string;
+  messages: AgentMessage[];
+  card: string;
+  status: string;
+  timestamp: number;
+  retiredMessages: number;
+  retiredTurns: number;
+  retired: ProjectionAudit["retired"];
+}
+
+// A turn is identified by how many user messages the scoped history holds;
+// steer messages are custom entries, so they stay inside the turn.
+function turnPinKey(messages: AgentMessage[]): number {
+  return messages.filter((message) => message.role === "user").length;
+}
+
+// Pi structuredClones messages before every context event, so identity is
+// lost between requests; compare serialized content instead.
+function messageFingerprint(message: AgentMessage | undefined): string {
+  return message ? JSON.stringify(message) : "";
+}
+
 export default function agentContextCard(pi: ExtensionAPI): void {
   let anchor: TaskAnchor = emptyAnchor();
   let currentTurn = 0;
@@ -221,6 +247,12 @@ export default function agentContextCard(pi: ExtensionAPI): void {
   let previousTurnSettled = false;
   let lastCard = "";
   let lastStatus = "";
+  // What the first provider request of the current user turn sent. Later
+  // requests in the same turn resend it unchanged plus the raw messages added
+  // since, so every request extends the previous one and the provider's
+  // prefix cache can read it back. Retirement and card changes wait for the
+  // next user turn. The fresh projection still drives hotEvidence and audit.
+  let turnPin: TurnPin | undefined;
   let lastAudit: ProjectionAudit | undefined;
   let taskId: string | undefined;
   let plan: PinnedPlan | undefined;
@@ -362,6 +394,7 @@ export default function agentContextCard(pi: ExtensionAPI): void {
     containedReflectionStreaks.clear();
     bashPatternCounts.clear();
     bashPatternReflectionStreaks.clear();
+    turnPin = undefined;
   };
 
   pi.registerFlag("context-card-recent-turns", {
@@ -1004,6 +1037,15 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       2,
     );
     const projection = projectContext(normalized, keepRecentTurns);
+    const pinKey = turnPinKey(scoped);
+    const pinned =
+      turnPin &&
+      turnPin.key === pinKey &&
+      scoped.length >= turnPin.sourceLength &&
+      messageFingerprint(scoped[0]) === turnPin.first &&
+      messageFingerprint(scoped[turnPin.sourceLength - 1]) === turnPin.boundary
+        ? turnPin
+        : undefined;
     let card = runtimeCard(ctx, normalized, projection.hotEvidence);
     const violations = checkCardInvariants(card);
     if (
@@ -1016,11 +1058,31 @@ export default function agentContextCard(pi: ExtensionAPI): void {
         plan: { ...card.plan, content: body },
       };
     }
-    lastCard = formatContextCard(card, {
-      planProjectionMode: planProjectionMode(),
-      planPhaseFramingMode: planPhaseFramingMode(),
-    });
-    lastStatus = formatCardStatus(card);
+    lastCard =
+      pinned?.card ??
+      formatContextCard(card, {
+        planProjectionMode: planProjectionMode(),
+        planPhaseFramingMode: planPhaseFramingMode(),
+      });
+    lastStatus = pinned?.status ?? formatCardStatus(card);
+    const projectedMessages = pinned
+      ? [...pinned.messages, ...scoped.slice(pinned.sourceLength)]
+      : projection.messages;
+    const timestamp = pinned?.timestamp ?? Date.now();
+    if (!pinned && scoped.length)
+      turnPin = {
+        key: pinKey,
+        sourceLength: scoped.length,
+        first: messageFingerprint(scoped[0]),
+        boundary: messageFingerprint(scoped[scoped.length - 1]),
+        messages: projection.messages,
+        card: lastCard,
+        status: lastStatus,
+        timestamp,
+        retiredMessages: projection.retiredMessages,
+        retiredTurns: projection.retiredTurns,
+        retired: projection.retired,
+      };
     const retiredNotes =
       card.plan?.scopeNotes &&
       planPhaseFramingState(card, {
@@ -1034,19 +1096,21 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       customType: CARD_MESSAGE_TYPE,
       content: lastCard,
       display: false,
-      timestamp: Date.now(),
+      timestamp,
     };
-    // Kept out of cardMessage (position 0) so its near-every-round churn
-    // (findings, pending, file-read leases, failures) doesn't invalidate
-    // the provider's prefix cache for the stable conversation history that
-    // sits between the two messages.
+    // Kept out of cardMessage (position 0) so its per-turn churn (latest
+    // request, HEAD, findings, leases, failures) doesn't invalidate the
+    // provider's prefix cache for the history behind the card. It sits right
+    // after the turn's user request, not at the end: Anthropic places its one
+    // cache breakpoint on the last message, and a trailing block that moves
+    // every request leaves no earlier breakpoint for the next one to read.
     const statusMessage: AgentMessage | undefined = lastStatus
       ? {
           role: "custom",
           customType: STATUS_MESSAGE_TYPE,
           content: lastStatus,
           display: false,
-          timestamp: Date.now(),
+          timestamp,
         }
       : undefined;
 
@@ -1066,8 +1130,14 @@ export default function agentContextCard(pi: ExtensionAPI): void {
           (entry) =>
             entry.type === "custom" && entry.customType === AUDIT_ENTRY_TYPE,
         ).length + 1;
+    const projectedChars = pinned
+      ? normalizeMessages(projectedMessages).reduce(
+          (sum, message) => sum + (message.text?.length ?? 0),
+          0,
+        )
+      : projection.projectedChars;
     const estimatedProjectedTokens = Math.ceil(
-      (projection.projectedChars + lastCard.length + lastStatus.length) / 4,
+      (projectedChars + lastCard.length + lastStatus.length) / 4,
     );
     const contextWindow = ctx.model?.contextWindow;
     lastAudit = {
@@ -1082,12 +1152,13 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       cardChars: lastCard.length,
       statusChars: lastStatus.length,
       originalMessages: scoped.length,
-      projectedMessages: projection.messages.length,
+      projectedMessages: projectedMessages.length,
       originalChars: projection.originalChars,
-      projectedChars: projection.projectedChars,
-      retiredMessages: projection.retiredMessages,
-      retiredTurns: projection.retiredTurns,
-      retired: projection.retired,
+      projectedChars,
+      turnPinned: pinned !== undefined,
+      retiredMessages: (pinned ?? projection).retiredMessages,
+      retiredTurns: (pinned ?? projection).retiredTurns,
+      retired: (pinned ?? projection).retired,
       hotEvidence: projection.hotEvidence,
       retiredProcessNotes: retiredNotes,
       continuity: {
@@ -1114,12 +1185,20 @@ export default function agentContextCard(pi: ExtensionAPI): void {
       });
     ctx.ui.setStatus(
       "agent-context-card",
-      `${projection.retiredMessages} message(s) retired · ${projection.messages.length} live`,
+      `${(pinned ?? projection).retiredMessages} message(s) retired · ${projectedMessages.length} live`,
+    );
+    if (!statusMessage)
+      return { messages: [cardMessage, ...projectedMessages] };
+    const requestIndex = projectedMessages.findLastIndex(
+      (message) => message.role === "user",
     );
     return {
-      messages: statusMessage
-        ? [cardMessage, ...projection.messages, statusMessage]
-        : [cardMessage, ...projection.messages],
+      messages: [
+        cardMessage,
+        ...projectedMessages.slice(0, requestIndex + 1),
+        statusMessage,
+        ...projectedMessages.slice(requestIndex + 1),
+      ],
     };
   });
 
