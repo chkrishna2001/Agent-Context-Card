@@ -74,7 +74,12 @@ One Pi session is one task. The first substantive request creates the task ancho
 
 ### Completed turns
 
-Completed older turns reduce to the user request and final assistant response. Intermediate tool history retires after it no longer belongs to active working evidence.
+Completed older turns reduce to the user request and final assistant response. Intermediate tool history retires after it no longer belongs to active working evidence. Only the last `--context-card-recent-turns` user turns (default 2: the
+previous and current) are projected at all; turns older than that are dropped
+entirely, and the card is their only continuity. Because the window slides at
+every user turn, the first request of each turn changes history from its first
+message and pays a full cache miss behind the card (see
+docs/notes/prompt-cache-effect-2026-10-05.md).
 
 ### Discovery retirement
 

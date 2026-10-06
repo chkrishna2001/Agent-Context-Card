@@ -96,7 +96,12 @@ plain rg/grep rounds were fully covered by a later read.
    `scripts/evaluation/turn-boundary-miss.ts`. 24/27 come from the two-turn
    window sliding (older turns dropped), not status relocation, so the miss
    is about one previous turn by design. Any remedy defers retirement on a
-   cost basis; treat it as an opt-in research mode, if at all. (c) Check
+   cost basis; treat it as an opt-in research mode, if at all. Open design
+   question, continuity as well as cost: turns older than the window are
+   dropped (`projection.ts` `firstTurn`), not kept as request + final-response
+   stubs. Stubs would make old history append-only and cacheable, but they add
+   tokens and change what the model sees; test with an A/B gate before
+   changing. (c) Check
    whether `zeroHotEvidenceAssertion` should count `consumed` leases (the
    kimi card-r3 turn-9 FAIL is a consumed lease).
 6. DONE (2026-10-05): `zeroHotEvidence` relaxed via
