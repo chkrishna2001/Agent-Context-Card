@@ -111,3 +111,22 @@ drops from ~3.8k to ~1.9k at a turn boundary while only ~1.3k is read from
 cache, so the per-turn miss outweighs what retirement saves at a 0.1 cached
 price. Net cost on kimi is unchanged within noise. Untested: Anthropic, where
 the breakpoint placement (cause 2) should now allow cache reads at all.
+
+### Where the turn-first miss starts (2026-10-06)
+
+`bun scripts/evaluation/turn-boundary-miss.ts <session.jsonl>...` rebuilds
+the previous turn's last request and this turn's first request with the real
+projection and finds the first changed message. On the three kimi card runs,
+24 of 27 turn boundaries change at the **first history message**: the
+projection keeps only the previous and current user turns and drops older
+completed turns entirely, so the window slides and everything after the card
+is recomputed (56.6k chars). The other 3 (turn 2) change only because the
+previous status block was dropped (17.5k chars). So freezing old status
+blocks in place would save almost nothing here. Keeping collapsed stubs of
+older turns would make the old part cacheable, but the previous turn still
+collapses at each boundary, so the recompute stays about one turn long. The
+per-turn miss is roughly the size of the previous turn, by design of the
+two-turn window. Cutting it means deferring retirement of the previous turn
+past the boundary, which is a cost threshold (see AGENTS.md on fixed budgets).
+On short-turn sessions at a 0.1 cached price, this is the true cost of
+retirement. Report it as such rather than tuning the fixture.

@@ -88,12 +88,17 @@ plain rg/grep rounds were fully covered by a later read.
    card/status/history pinned per user turn (`turnPinned` in the audit).
    kimi n=3: correctness intact, effective cost unchanged (+50.8% median).
    The remaining cost is one miss per turn from boundary retirement.
-5. Next: (a) Haiku gate to confirm the breakpoint fix yields cache reads
-   (costs money; ask first); (b) the per-turn miss. Candidates: keep earlier
-   turns' status blocks in history so only real retirement moves the prefix;
-   or retire at a boundary only when it frees more than it forces to
-   recompute (check against the no-fixed-budget rule in AGENTS.md first).
-   Then rerun gemma4:31b ten-turn n=3 and report `cache-effect.mjs` output.
+5. Next: (a) Haiku: first a cheap card-only check that within-turn requests
+   read cache at all (`--variant card`, no repeats; prompts must exceed
+   Haiku's ~4k minimum cacheable size, else use SWE 18211 card-only n=1).
+   Paid; ask the user first. Paired n=3 only if reads > 0 and a cost claim
+   is wanted. (b) Turn-first misses: measured with
+   `scripts/evaluation/turn-boundary-miss.ts`. 24/27 come from the two-turn
+   window sliding (older turns dropped), not status relocation, so the miss
+   is about one previous turn by design. Any remedy defers retirement on a
+   cost basis; treat it as an opt-in research mode, if at all. (c) Check
+   whether `zeroHotEvidenceAssertion` should count `consumed` leases (the
+   kimi card-r3 turn-9 FAIL is a consumed lease).
 6. DONE (2026-10-05): `zeroHotEvidence` relaxed via
    `zeroHotEvidenceAssertion` in `scripts/evaluation/metrics.mjs`: when the
    previous turn's trace has `mutations === 0` and leases remain, it records a
