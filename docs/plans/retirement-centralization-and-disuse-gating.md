@@ -1,6 +1,6 @@
 # Retirement without a mutation (centralization, disuse gating, superseded reads)
 
-**Status (2026-10-06): the cache-stability change (item 4) is built and
+**Status (2026-10-08): stubbed old turns (request + reply, with or without a tool-summary line) were tried on kimi n=3 and failed correctness (1/3, 0/3); reverted, see `docs/notes/stubbed-old-turns-2026-10-06.md`. Earlier (2026-10-06): the cache-stability change (item 4) is built and
 gated on kimi ten-turn n=3: within-turn caching is fixed (later-request
 uncached input -42%, near baseline), but turn-first misses from boundary
 retirement are unchanged, so kimi effective cost is still ~+50% vs baseline.
@@ -97,9 +97,7 @@ plain rg/grep rounds were fully covered by a later read.
    cost basis; treat it as an opt-in research mode, if at all. Open design
    question, continuity as well as cost: turns older than the window are
    dropped (`projection.ts` `firstTurn`), not kept as request + final-response
-   stubs. Stubs would make old history append-only and cacheable, but they add
-   tokens and change what the model sees; test with an A/B gate before
-   changing. (c) Check
+   stubs. Stubs were tried and failed (see the note above); do not retry. (c) Check
    whether `zeroHotEvidenceAssertion` should count `consumed` leases (the
    kimi card-r3 turn-9 and glm-5.3 card-r3 turn-3 FAILs are both consumed
    leases). (d) glm-5.3 n=3 done: correctness intact, effective +35% at 0.1,
