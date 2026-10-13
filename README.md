@@ -2,6 +2,9 @@
 
 **Keep coding agents focused as sessions grow.**
 
+> **Project concluded (2026-10-13).** Raw token savings below do not survive
+> prompt caching; see [Status](#status) before using this.
+
 agent-context-card is a passive context-projection extension for Pi. It keeps exact evidence while it is useful, retires it when observable lifecycle events make it replaceable, and prevents unrelated tasks from inheriting old context.
 
 > **Measured result:** 58.3% fewer provider input tokens in a four-turn Gemma A/B run, with 25% fewer tool calls and zero tool errors in the card-enabled session.
@@ -255,8 +258,22 @@ Releases are published to npm only from version tags after CI and changelog vali
 
 ## Status
 
-**Research preview.** The evidence is a strong proof of concept. Repeated
-broader-repository runs and live fork/interruption/tree-navigation gates remain
-before a production-ready claim.
+**Concluded research project (2026-10-13). No further development is planned.**
+
+What held up: deterministic retirement lowers raw provider input, tool calls,
+and tool errors, and model-facing memory tools made agents worse (see AGENTS.md,
+"What was tried first").
+
+What did not: on providers that cache prompt prefixes, the card raised
+effective cost in every ten-turn gate measured (+45% to +63% median at a 0.1×
+cached-token price, +530% on Claude Haiku), because projection changes history
+at each user turn and breaks the cache. See
+[docs/notes/prompt-cache-effect-2026-10-05.md](docs/notes/prompt-cache-effect-2026-10-05.md).
+Correctness was also worse than baseline in some small-model gates (GPT-5 Nano).
+
+Where it may still fit: small or local models with a short context window and
+no per-token cache discount. Turns older than the recent-turn window are
+dropped, so history does not grow without bound across turns. A single long
+turn is not capped, and very long sessions were never validated.
 
 Licensed under MIT.
